@@ -4,28 +4,32 @@ jobs:
   server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
       - run: go vet ./... && go test ./...
         working-directory: server
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: server/go.mod
-      - uses: golangci/golangci-lint-action@v8
+          cache-dependency-path: server/go.sum
+      - uses: golangci/golangci-lint-action@v9
         with:
           working-directory: server
   webapp:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: webapp/package-lock.json
       - run: npm ci && npm run check-types && npm test && npm run build
         working-directory: webapp
