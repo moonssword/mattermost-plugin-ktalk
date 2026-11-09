@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-09
+
+### Changed
+
+- Test mode opens the plugin only to the listed testers. System administrators no longer get access automatically; the new *Access for system administrators* setting grants it to all of them. The *Connection* block in the System Console warns when nobody has access.
+
 ## [0.5.0] - 2026-11-09
 
 First public release.
@@ -92,5 +98,6 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/moonssword/mattermost-plugin-ktalk/releases/tag/v0.5.0

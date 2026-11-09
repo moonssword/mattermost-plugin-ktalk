@@ -1,6 +1,6 @@
 {
   "name": "mattermost-plugin-ktalk-webapp",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Webapp half of the Kontur Talk Mattermost plugin",
   "scripts": {

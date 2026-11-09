@@ -87,7 +87,7 @@ The plugin schedules through the Kontur Talk calendar and never connects to mail
 
 ### Test mode
 
-As in Mattermost Calls, test mode limits the plugin to system administrators and an optional list of testers. Everyone else sees no buttons or sidebar, and commands and the API refuse them. Cards that were already posted stay visible to the channel, so test in a separate channel.
+Test mode limits the plugin to the users listed in *Testers*. System administrators are not included by default, since a large organisation may have many of them; the *Access for system administrators* setting adds them all. Everyone else sees no buttons or sidebar, receives no calls, and commands and the API refuse them. The System Console keeps working for administrators either way. Cards that were already posted stay visible to the channel, so test in a separate channel.
 
 ## Visual styles
 

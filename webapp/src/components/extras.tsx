@@ -146,12 +146,21 @@ interface AdminStatus {
     webhooks_enabled: boolean;
     webhook_target: string;
     webhook?: {activated: boolean; last_event: string};
-    test_mode?: {users: string[]; unknown: string[]};
+    test_mode?: {users: string[]; unknown: string[]; admins?: boolean};
     key_error?: string;
     expires_at?: string;
     tariff_expires_at?: string;
     online?: {usersCount: number; conferencesCount: number};
     features?: Array<{scope: string; feature: string; ok: boolean}>;
+}
+
+/** Who can use the plugin in test mode, as the System Console says it. */
+function testModeText(users: string[], admins: boolean): string {
+    if (users.length === 0 && !admins) {
+        return 'Режим тестирования включён, но тестировщиков нет: плагином сейчас не пользуется никто. Добавьте логины в «Тестировщики» или откройте доступ системным администраторам.';
+    }
+    const who = [admins ? 'системные администраторы' : '', users.join(', ')].filter(Boolean).join(' и ');
+    return `Режим тестирования включён. Плагином пользуются ${who}.`;
 }
 
 // System Console text stays in Russian: administrators read it alongside the
@@ -196,8 +205,8 @@ export const AdminStatusPanel = () => {
             {status?.key_error && <div className='ktk-error'>{status.key_error}</div>}
             {status?.test_mode && (
                 <div>
-                    <div>
-                        {status.test_mode.users.length > 0 ? `Режим тестирования включён. Плагином пользуются системные администраторы и ${status.test_mode.users.join(', ')}.` : 'Режим тестирования включён. Плагином пользуются только системные администраторы.'}
+                    <div className={status.test_mode.users.length === 0 && !status.test_mode.admins ? 'ktk-missing' : undefined}>
+                        {testModeText(status.test_mode.users, Boolean(status.test_mode.admins))}
                     </div>
                     {status.test_mode.unknown.length > 0 && <div className='ktk-missing'>{`Таких пользователей нет: ${status.test_mode.unknown.join(', ')}.`}</div>}
                 </div>

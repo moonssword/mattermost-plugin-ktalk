@@ -51,6 +51,7 @@ type configuration struct {
 	CardStyle            string
 	TestMode             bool
 	TestModeUsers        string
+	TestModeAdmins       bool
 
 	testers map[string]bool
 }
@@ -127,14 +128,18 @@ func parseUsernames(raw string) map[string]bool {
 	return users
 }
 
-// allowsUser applies test mode, which works like the one in Mattermost Calls:
-// while it is on, only system administrators use the plugin, plus the testers
-// listed in the settings.
+// allowsUser applies test mode: while it is on, only the listed testers use
+// the plugin. System administrators join them only when the settings say so,
+// since a large organisation may have many of them. The System Console works
+// for administrators either way.
 func (c *configuration) allowsUser(user *model.User) bool {
 	if !c.TestMode {
 		return true
 	}
-	return user != nil && (user.IsSystemAdmin() || c.testers[strings.ToLower(user.Username)])
+	if user == nil {
+		return false
+	}
+	return c.testers[strings.ToLower(user.Username)] || (c.TestModeAdmins && user.IsSystemAdmin())
 }
 
 func generateSecret() (string, error) {

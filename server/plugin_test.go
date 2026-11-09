@@ -521,7 +521,7 @@ func TestNeedsResults(t *testing.T) {
 	}
 }
 
-func TestTestModeLikeCalls(t *testing.T) {
+func TestTestModeOnlyListedUsers(t *testing.T) {
 	cfg := &configuration{TestMode: true, TestModeUsers: " @Anna, boris;\nvera  "}
 	cfg.applyDefaults()
 	admin := &model.User{Username: "boss", Roles: "system_user system_admin"}
@@ -530,13 +530,20 @@ func TestTestModeLikeCalls(t *testing.T) {
 			t.Errorf("%q: got %v", name, got)
 		}
 	}
+	if cfg.allowsUser(admin) {
+		t.Error("system administrators must not get access by default")
+	}
+	if !cfg.allowsUser(&model.User{Username: "anna", Roles: "system_user system_admin"}) {
+		t.Error("a listed administrator is a tester like anyone else")
+	}
+	cfg.TestModeAdmins = true
 	if !cfg.allowsUser(admin) {
-		t.Error("system administrators always test, as in Calls")
+		t.Error("the admin setting opens the plugin to every system administrator")
 	}
 	empty := &configuration{TestMode: true}
 	empty.applyDefaults()
-	if empty.allowsUser(&model.User{Username: "anna", Roles: "system_user"}) || !empty.allowsUser(admin) {
-		t.Error("with no testers only administrators may use the plugin")
+	if empty.allowsUser(admin) || empty.allowsUser(&model.User{Username: "anna", Roles: "system_user"}) {
+		t.Error("with no testers and no admin access nobody may use the plugin")
 	}
 	off := &configuration{TestModeUsers: "anna"}
 	off.applyDefaults()

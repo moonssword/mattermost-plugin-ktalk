@@ -66,7 +66,7 @@ func (p *Plugin) initRouter() http.Handler {
 	return mux
 }
 
-const testModeMessage = "Плагин работает в режиме тестирования: пока им пользуются только системные администраторы и тестировщики."
+const testModeMessage = "Плагин работает в режиме тестирования: пока им пользуются только тестировщики."
 
 func (p *Plugin) testModeGate(handler func(http.ResponseWriter, *http.Request, string) error) func(http.ResponseWriter, *http.Request, string) error {
 	return func(w http.ResponseWriter, r *http.Request, userID string) error {
@@ -494,7 +494,7 @@ func (p *Plugin) testModeReport(cfg *configuration) map[string]any {
 	}
 	sort.Strings(found)
 	sort.Strings(missing)
-	return map[string]any{"users": found, "unknown": missing}
+	return map[string]any{"users": found, "unknown": missing, "admins": cfg.TestModeAdmins}
 }
 
 func keyErrorText(err error) string {
