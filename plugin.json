@@ -1,0 +1,229 @@
+{
+    "id": "konturtalk",
+    "name": "Контур.Толк",
+    "description": "Встречи Контур.Толка в Mattermost: запуск в один клик, звонки, планирование, записи, транскрипты и резюме.",
+    "homepage_url": "https://github.com/moonssword/mattermost-plugin-ktalk",
+    "support_url": "https://github.com/moonssword/mattermost-plugin-ktalk/issues",
+    "release_notes_url": "https://github.com/moonssword/mattermost-plugin-ktalk/blob/main/CHANGELOG.md",
+    "icon_path": "assets/icon.svg",
+    "version": "0.5.0",
+    "min_server_version": "11.7.0",
+    "server": {
+        "executables": {
+            "linux-amd64": "server/dist/plugin-linux-amd64",
+            "linux-arm64": "server/dist/plugin-linux-arm64"
+        }
+    },
+    "webapp": {
+        "bundle_path": "webapp/dist/main.js"
+    },
+    "settings_schema": {
+        "header": "Адрес пространства и API-ключ у каждой установки свои. Для переноса с тестового пространства на рабочее достаточно поменять их здесь.",
+        "settings": [
+            {
+                "key": "ConnectionStatus",
+                "display_name": "Подключение",
+                "type": "custom"
+            },
+            {
+                "key": "TestMode",
+                "display_name": "Режим тестирования",
+                "type": "bool",
+                "default": false,
+                "help_text": "Когда включён тестовый режим, только системные администраторы могут запускать встречи и звонки. Это позволяет провести тестирование, чтобы убедиться, что плагин работает так, как ожидалось. Остальные не видят кнопок и панели плагина. Уже опубликованные карточки видны всем участникам канала, поэтому проверяйте в отдельном канале."
+            },
+            {
+                "key": "TestModeUsers",
+                "display_name": "Дополнительные тестировщики",
+                "type": "longtext",
+                "placeholder": "anna, boris",
+                "help_text": "Логины Mattermost через запятую или с новой строки. В режиме тестирования эти пользователи работают с плагином наравне с системными администраторами. Пусто: только администраторы."
+            },
+            {
+                "key": "SpaceURL",
+                "display_name": "Адрес пространства",
+                "type": "text",
+                "placeholder": "https://company.ktalk.ru",
+                "help_text": "Полный адрес пространства Контур.Толка, без пути в конце."
+            },
+            {
+                "key": "APIKey",
+                "display_name": "API-ключ пространства",
+                "type": "text",
+                "secret": true,
+                "help_text": "Управление → API-ключи. Без ключа плагин работает в режиме ссылок: создаёт ссылку на комнату, но не управляет ей. Какие области нужны для каких функций, показано выше."
+            },
+            {
+                "key": "CardStyle",
+                "display_name": "Стиль по умолчанию",
+                "type": "dropdown",
+                "default": "current",
+                "help_text": "Вид карточек встреч и правой панели. Меняется только то, что рисует плагин: аватар и имя автора сообщения остаются стандартными. Пользователь может выбрать свой стиль в настройках.",
+                "options": [
+                    {
+                        "display_name": "Текущий",
+                        "value": "current"
+                    },
+                    {
+                        "display_name": "Карточки",
+                        "value": "cards"
+                    },
+                    {
+                        "display_name": "Компактный",
+                        "value": "compact"
+                    }
+                ]
+            },
+            {
+                "key": "NamingScheme",
+                "display_name": "Имена комнат по умолчанию",
+                "type": "dropdown",
+                "default": "words",
+                "options": [
+                    {
+                        "display_name": "Случайные слова",
+                        "value": "words"
+                    },
+                    {
+                        "display_name": "UUID",
+                        "value": "uuid"
+                    },
+                    {
+                        "display_name": "Команда и канал",
+                        "value": "context"
+                    },
+                    {
+                        "display_name": "Спрашивать пользователя",
+                        "value": "ask"
+                    }
+                ]
+            },
+            {
+                "key": "RoomPrefix",
+                "display_name": "Префикс комнат",
+                "type": "text",
+                "default": "mm",
+                "help_text": "Делает комнаты плагина узнаваемыми в статистике Толка. Только строчные латинские буквы и цифры."
+            },
+            {
+                "key": "PublicLobby",
+                "display_name": "Зал ожидания в публичных каналах",
+                "type": "bool",
+                "default": false,
+                "help_text": "В приватных каналах зал ожидания включён всегда, в личных и групповых чатах выключен."
+            },
+            {
+                "key": "PublicGuestHours",
+                "display_name": "Вход без аккаунта в публичных каналах, часов",
+                "type": "number",
+                "default": 0,
+                "help_text": "Сколько часов после создания встречи можно войти по ссылке без аккаунта в Толке. 0: вход закрыт. В приватных каналах и чатах по умолчанию закрыт всегда."
+            },
+            {
+                "key": "MuteAboveMembers",
+                "display_name": "Выключать микрофон и камеру при входе, если в канале больше",
+                "type": "number",
+                "default": 15
+            },
+            {
+                "key": "EnableCalls",
+                "display_name": "Звонки в личных и групповых чатах",
+                "type": "bool",
+                "default": true,
+                "help_text": "Кнопка камеры в личном или групповом чате звонит собеседникам: в Mattermost появляется входящий звонок со звуком, на телефон приходит уведомление. Каждый пользователь может отключить входящие в своих настройках."
+            },
+            {
+                "key": "RingInTalk",
+                "display_name": "Дублировать звонок в приложение Толка",
+                "type": "bool",
+                "default": true,
+                "help_text": "Тем, у кого есть аккаунт в Толке, звонок придёт ещё и в приложение Толка. Полезно, если сотрудники держат приложение Толка открытым."
+            },
+            {
+                "key": "SetMeetingStatus",
+                "display_name": "Показывать встречу в статусе Mattermost",
+                "type": "bool",
+                "default": true,
+                "help_text": "Пока человек находится во встрече, начатой из Mattermost, его статус меняется на «На встрече в Контур.Толке». После встречи возвращается прежний статус. Каждый пользователь может отключить это у себя в настройках."
+            },
+            {
+                "key": "PostRecordings",
+                "display_name": "Публиковать записи в тред встречи",
+                "type": "bool",
+                "default": true
+            },
+            {
+                "key": "PostSummaries",
+                "display_name": "Публиковать краткий пересказ в тред встречи",
+                "type": "bool",
+                "default": true,
+                "help_text": "Текст пересказа увидят все участники канала."
+            },
+            {
+                "key": "RecordingLinkAccess",
+                "display_name": "Доступ к записи по ссылке",
+                "type": "dropdown",
+                "default": "domain",
+                "help_text": "Что выставлять новой записи. Иначе участники канала могут не открыть ссылку.",
+                "options": [
+                    {
+                        "display_name": "Не менять",
+                        "value": ""
+                    },
+                    {
+                        "display_name": "Только по приглашению",
+                        "value": "none"
+                    },
+                    {
+                        "display_name": "Все в пространстве",
+                        "value": "domain"
+                    },
+                    {
+                        "display_name": "Все, у кого есть ссылка",
+                        "value": "global"
+                    }
+                ]
+            },
+            {
+                "key": "ReminderMinutes",
+                "display_name": "Напоминать о встрече за, минут",
+                "type": "number",
+                "default": 10
+            },
+            {
+                "key": "AllowPersonalKeys",
+                "display_name": "Разрешить личные API-ключи",
+                "type": "bool",
+                "default": true,
+                "help_text": "Пользователь подключает ключ из своих настроек Толка в «Настройки → Контур.Толк» или на вкладке «Запланированные». Тогда встречи планируются от его имени, а на приглашения можно отвечать прямо в Mattermost."
+            },
+            {
+                "key": "CalendarPersonalOnly",
+                "display_name": "Календарь только с личным ключом",
+                "type": "bool",
+                "default": false,
+                "help_text": "Планирование и список встреч работают, только если пользователь подключил личный ключ. Без этой настройки календарь пользователя открывается ключом пространства по подтверждённому адресу почты."
+            },
+            {
+                "key": "AllowGuests",
+                "display_name": "Разрешить гостям Mattermost запускать встречи",
+                "type": "bool",
+                "default": false
+            },
+            {
+                "key": "RequireVerifiedEmail",
+                "display_name": "Сопоставлять с Толком только подтверждённые адреса",
+                "type": "bool",
+                "default": true,
+                "help_text": "Пользователей ищут в Толке по почте. Если адрес не подтверждён, его можно заменить на чужой и получить доступ к чужому календарю. Отключайте, только если почту в Mattermost нельзя менять самостоятельно."
+            },
+            {
+                "key": "EnableWebhooks",
+                "display_name": "Использовать вебхуки",
+                "type": "bool",
+                "default": false,
+                "help_text": "Ускоряет обновление статусов. Нужны область «Вебхуки» у ключа и адрес Mattermost, доступный из интернета. Без вебхуков статусы обновляются опросом API каждые 30 секунд."
+            }
+        ]
+    }
+}

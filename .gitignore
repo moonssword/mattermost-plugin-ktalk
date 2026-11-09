@@ -1,0 +1,26 @@
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+
+# Dependencies and build output
+node_modules/
+dist/
+server/dist/
+webapp/dist/
+
+# Test runs and reports
+coverage/
+coverage.out
+*.coverprofile
+test-results/
+playwright-report/
+*.log
+.cache/
+tmp/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

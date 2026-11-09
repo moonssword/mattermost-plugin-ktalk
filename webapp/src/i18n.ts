@@ -1,0 +1,155 @@
+import {useSelector} from 'react-redux';
+
+const en: Record<string, string> = {
+    'Контур.Толк': 'Kontur Talk',
+    'Начать встречу': 'Start a meeting',
+    'Начать встречу в Контур.Толке': 'Start a Kontur Talk meeting',
+    'Запланировать встречу': 'Schedule a meeting',
+    'Обсудить в Толке': 'Discuss in Talk',
+    'Присоединиться': 'Join',
+    'Скопировать ссылку': 'Copy link',
+    'Скопировано': 'Copied',
+    'Начать запись': 'Start recording',
+    'Завершить для всех': 'End for everyone',
+    'Завершить встречу для всех участников?': 'End the meeting for all participants?',
+    'Отменить звонок': 'Cancel call',
+    'Изменить': 'Edit',
+    'Отменить встречу': 'Cancel meeting',
+    'Отменить эту встречу? Участники получат уведомление.': 'Cancel this meeting? Attendees will be notified.',
+    'Ожидание участников': 'Waiting for participants',
+    'Идёт звонок': 'Calling',
+    'Идёт встреча': 'In progress',
+    'Завершена': 'Ended',
+    'Не состоялась': 'Did not take place',
+    'Запланирована': 'Scheduled',
+    'Отменена': 'Cancelled',
+    'Запись идёт': 'Recording',
+    'Начал(а)': 'Started by',
+    'Организатор': 'Organizer',
+    'ПИН-код': 'PIN',
+    'Зал ожидания': 'Waiting room',
+    'Вход без аккаунта до': 'Guest access until',
+    'Дозвон': 'Dial in',
+    'В комнате': 'In the room',
+    'Были на встрече': 'Attended',
+    'Не пришли': 'Did not join',
+    'Итоги в Толке': 'Results in Talk',
+    'Записи': 'Recordings',
+    'Заметки': 'Notes',
+    'Опросы': 'Polls',
+    'Доски': 'Boards',
+    'Принял(а)': 'Accepted',
+    'Отклонил(а)': 'Declined',
+    'Нет ответа': 'No response',
+    'Звоним': 'Calling',
+    'Не беспокоить': 'Do not disturb',
+    'Уже разговаривает': 'On a call',
+    'Нет в Толке': 'Not in Talk',
+    'Звонки отключены': 'Calls off',
+    'Не дозвонились': 'No answer',
+    'Отменён': 'Cancelled',
+    'Ошибка': 'Error',
+    'Сейчас': 'Now',
+    'Запланированные': 'Upcoming',
+    'Моя комната': 'My room',
+    'Нет идущих встреч в ваших каналах.': 'No meetings in your channels right now.',
+    'Нет встреч на ближайшую неделю.': 'No meetings in the next seven days.',
+    'Записей пока нет.': 'No recordings yet.',
+    'Поиск записей': 'Search recordings',
+    'Поиск по тексту': 'Search the text',
+    'Показать ещё': 'Show more',
+    'Загрузка…': 'Loading…',
+    'Назад': 'Back',
+    'Открыть в Толке': 'Open in Talk',
+    'Пересказ': 'Summary',
+    'Протокол': 'Minutes',
+    'Транскрипт': 'Transcript',
+    'Ещё готовится.': 'Still being prepared.',
+    'Недоступно для этой записи.': 'Not available for this recording.',
+    'Ничего не найдено.': 'Nothing found.',
+    'участников': 'participants',
+    'участник': 'participant',
+    'участника': 'participants',
+    'В Толке': 'In Talk',
+    'на встрече': 'in a meeting',
+    'не беспокоить': 'do not disturb',
+    'в сети': 'online',
+    'Позвонить в Толке': 'Call in Talk',
+    'Плагин не настроен: укажите адрес пространства в системной консоли.': 'The plugin is not set up: enter the space address in the System Console.',
+    'Встреча в Контур.Толке': 'Kontur Talk meeting',
+    'Запись в Контур.Толке': 'Kontur Talk recording',
+    'Не удалось выполнить действие.': 'The action failed.',
+    'Повторяется': 'Repeats',
+    'Автозапись': 'Auto-recording',
+    'Вход': 'Entry',
+    'Через зал ожидания': 'Through the waiting room',
+    'Когда': 'When',
+    'Описание': 'Description',
+    'Идут сейчас': 'In progress',
+    'Ожидают участников': 'Waiting for participants',
+    'Запись': 'Recording',
+    'Материалы': 'Materials',
+    'Режим тестирования': 'Test mode',
+    'входящий звонок': 'incoming call',
+    'Входящий звонок': 'Incoming call',
+    'звонит вам · Контур.Толк': 'is calling you · Kontur Talk',
+    'Отклонить': 'Decline',
+    'В этом канале': 'In this channel',
+    'Ежемесячно': 'Monthly',
+    'Еженедельно': 'Weekly',
+    'Ежедневно': 'Daily',
+    'Вы': 'You',
+    'Ваш ответ': 'Your answer',
+    'Принять': 'Accept',
+    'Ответить': 'Answer',
+    'Чтобы отвечать отсюда, подключите личный ключ Толка': 'Connect your personal Talk key to answer from here',
+    'Вы приняли приглашение.': 'You accepted the invitation.',
+    'Вы отклонили приглашение.': 'You declined the invitation.',
+    'Войти': 'Join',
+    'Начать': 'Start',
+    'Запланировать': 'Schedule',
+    'Комната': 'Room',
+    'Подробнее': 'More info',
+    'От имени': 'Acting as',
+    'Отключить': 'Disconnect',
+    'Подключить ключ': 'Connect key',
+    'Скрыть': 'Hide',
+    'Подключить': 'Connect',
+    'Отмена': 'Cancel',
+    'Проверяем…': 'Checking…',
+    'Вставьте ключ.': 'Paste the key.',
+    'Личный ключ Толка': 'Personal Talk key',
+    'Личный ключ Толка подключён': 'Personal Talk key connected',
+    'Отвечайте на приглашения прямо здесь': 'Answer invitations right here',
+    'Календарь работает от вашего имени': 'The calendar acts on your behalf',
+    'Подключите личный ключ Толка, чтобы планировать встречи от своего имени и отвечать на приглашения прямо здесь.': 'Connect your personal Talk key to schedule meetings under your own name and answer invitations right here.',
+    'Где взять: в Толке нажмите на аватар → Настройки → API ключи → Выпустить ключ. Ключ хранится в зашифрованном виде.': 'Where to get it: in Talk, click your avatar → Settings → API keys → Issue key. The key is stored encrypted.',
+    'С личным ключом Толка встречи из Mattermost создаются от вашего имени, а на приглашения можно отвечать прямо в карточке встречи. Без ключа встречи создаются через ключ пространства.': 'With a personal Talk key, meetings from Mattermost are created under your name and you can answer invitations right in the meeting card. Without it, meetings are created with the space key.',
+};
+
+export function translate(locale: string | undefined, text: string): string {
+    if (locale && !locale.startsWith('ru')) {
+        return en[text] || text;
+    }
+    return text;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function localeFromState(state: any): string | undefined {
+    const users = state?.entities?.users;
+    return users?.profiles?.[users?.currentUserId]?.locale;
+}
+
+export function useLocale(): string | undefined {
+    return useSelector(localeFromState);
+}
+
+export function useT(): (text: string) => string {
+    const locale = useLocale();
+    return (text: string) => translate(locale, text);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function tFromState(state: any, text: string): string {
+    return translate(localeFromState(state), text);
+}
