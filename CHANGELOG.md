@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
 ### Added
 
 - A period filter on the *Recordings* tab, up to a month long and the last 30 days by default. The server refuses longer periods.
@@ -34,7 +36,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Buttons for a recording on cards and in the meeting thread are shown only to those who may open it in Talk; others no longer see buttons that would refuse them.
 - Users who sign in through SAML, LDAP or OAuth are matched to Talk by the address from the identity provider even when Mattermost has not marked it verified. Password accounts still need a verified address.
 - Talk is now the only source of access to recordings. The plugin shows a recording, its summary, minutes and transcript only to a Talk user who holds a role on it in Talk: its author, the meeting's participants and anyone the owner shared it with. Channel membership no longer grants access, and system administrators get no exception. Users whose verified address is not found in Talk see no recordings.
-- New recordings are no longer opened to the whole space. *Recording link access* now defaults to *Do not change*, so Talk keeps its own access rules; installations that saved another value keep it.
+- The plugin no longer opens every new recording to the whole space. The *Recording link access* setting became *Default recording access*: the choice preselected when a recording starts from Mattermost and the access of automatic recordings, *Only those present* unless set otherwise. Recordings started in Talk keep the access chosen there.
 - The summary is no longer posted as text to the meeting thread, which the whole channel reads. The thread gets a notice with a *Summary* button, and the text opens only for those Talk allows.
 - A personal key is refused when the Mattermost user has no matching Talk user, and the owner's name must match in full; before, a key was taken on trust in the first case and a partial name was enough in the second.
 - The participant search of the scheduling form checks that the user belongs to the team it searches; the plugin API does not check that by itself.
@@ -137,6 +139,7 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/moonssword/mattermost-plugin-ktalk/releases/tag/v0.5.0

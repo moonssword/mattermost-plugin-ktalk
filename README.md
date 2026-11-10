@@ -15,13 +15,13 @@ A Mattermost plugin for [Kontur Talk](https://kontur.ru/talk) (Контур.То
 
 ## Features
 
-- **One-click meetings.** A channel header button, `/talk start [topic]`, a button in the channel intro, and *Discuss in Talk* in the message menu.
-- **Live meeting cards.** Status, duration, who is in the room, PIN, dial-in numbers, and *Join*, *Start recording* and *End for everyone* buttons.
+- **One-click meetings.** A channel header button, `/talk start [topic]`, a button in the channel intro, and *Discuss in Talk* in the message menu. In a channel the meeting link is posted; in a direct or group chat the call button asks whether to ring or only post the link, and `/talk link [topic]` posts it without ringing.
+- **Live meeting cards.** Status, duration, who is in the room, PIN, dial-in numbers, and *Join*, *Start recording* and *End for everyone* buttons, shown to those Talk allows to use them.
 - **Calls in direct and group messages.** The call button offers to ring or only send a meeting link. Recipients of a call get it inside Mattermost: a ringing window, a desktop notification and a mobile push. People with a Talk account can also be rung in the Talk app. Answers show up on the caller's card.
 - **Scheduling.** `/talk schedule` with time, recurrence chosen as in Talk (weekdays, every N days, weeks or months on chosen days, until a date or for a number of meetings), participants, external guests, PIN, waiting room and auto-recording. The card tracks invitees' answers, and the bot posts a reminder before the start.
 - **Answering invitations.** With a personal Talk key, invitees accept or decline right in the attendee list on the card. For a recurring meeting the answer applies to the whole series.
 - **Recordings and summaries.** The meeting thread is told when the recording and the summary are ready; only the author and participants can open them. The *Recordings* tab lists them for a chosen period of up to a month; minutes and a searchable transcript open in the sidebar.
-- **Sidebar.** *Now*, *Upcoming* and *Recordings* tabs, quick start and a personal room. Recurring meetings collapse into one row, and your own meetings can be edited from *Upcoming*.
+- **Sidebar.** *Now*, *Upcoming* and *Recordings* tabs, quick start and a personal room. *Start* posts a meeting link; in a direct or group chat an arrow next to it offers *Call*. Recurring meetings collapse into one row, and meetings you organize can be edited from *Upcoming*.
 - **Presence.** While someone is in a meeting, their Mattermost status reads "In a Kontur Talk meeting". The profile popover shows a colleague's Talk status and a *Call in Talk* button.
 - **Three visual styles,** in light and dark themes, chosen by the administrator and overridable per user.
 
@@ -84,7 +84,20 @@ Talk has no OAuth for third-party apps, so the plugin relies on the space key an
 
 **Personal Talk keys** are optional. A user issues one in Talk (*Settings → API keys*) and pastes it in **Settings → Контур.Толк** or on the *Upcoming* tab. With it, meetings are created in the user's own calendar under their name, and invitations can be answered from Mattermost. The plugin checks that the key belongs to the same Talk user, stores it encrypted, and disconnects it if Talk stops accepting it. The *Calendar with personal keys only* setting forbids scheduling through the space key for users without one.
 
-**Recordings follow Talk's own access rules.** Starting a recording from a card asks who may open it, with the same choices as Talk; the plugin applies the choice when the recording is finished, since Talk does not accept it earlier. Stopping or pausing a recording is possible only in Talk: its API has no such method. For every recording the plugin asks Talk who holds a role on it (the author, the meeting's participants and anyone the owner shared it with) and shows the recording, summary, minutes and transcript only to them. Channel membership grants nothing, and system administrators get no exception. The meeting thread receives a notice that a summary is ready, never the text itself. By default the plugin leaves a new recording's link access as Talk set it; *Recording link access* can open it to the whole space, which makes the link posted in the channel work for everyone there.
+### Recordings
+
+Talk decides who may open a recording. For every recording the plugin asks Talk who holds a role on it (the author, the meeting's participants and anyone the owner shared it with) and shows the recording, summary, minutes and transcript only to them; buttons for a recording are hidden from everyone else. Channel membership grants nothing, and system administrators get no exception. The meeting thread receives notices that a recording or a summary is ready, never the summary text.
+
+*Start recording* on a card asks who may open the recording, with Talk's own choices:
+
+| Choice | Who opens it in Talk | Who sees it in Mattermost |
+|---|---|---|
+| Only me | The author | The author |
+| Only those present | The author and the participants with a Talk account | The same people |
+| Anyone in the space with the link | Any colleague with the link | The author and the participants |
+| Anyone on the internet with the link | Anyone with the link | The author and the participants |
+
+Talk accepts the choice only once a recording is finished, so the plugin applies it then; if Talk refuses, the person who started the recording gets a message. The *Default recording access* setting picks the preselected choice and the access of automatic recordings. Recordings started in Talk keep the access chosen there. Stopping or pausing a recording is possible only in Talk: its API has no such method.
 
 ### Status updates
 
@@ -110,7 +123,7 @@ The *Default style* setting picks the look of cards and the sidebar; users can c
 
 ## Commands
 
-`/talk help` lists all commands. `pin`, `guests`, `lobby`, `record` and `end` act on the channel's latest active meeting and are available to the moderators of its room in Talk. `/talk connect` opens the personal key form.
+`/talk help` lists all commands. `/talk start [topic]` starts a meeting and, in a direct or group chat, rings; `/talk link [topic]` only posts the link. `pin`, `guests`, `lobby`, `record` and `end` act on the channel's latest active meeting and are available to the moderators of its room in Talk. `/talk connect` opens the personal key form.
 
 ## Working alongside Mattermost Calls
 
@@ -119,6 +132,7 @@ The plugins do not interfere: Calls keeps its `/call` command, posts and calls. 
 ## Known limitations
 
 - Recording can start only while a registered Talk user is in the room; this is how the Talk API works.
+- A recording can be stopped or paused only in Talk, and its access can be changed only once it is finished.
 - Meeting results reach Talk's history a few minutes after the end. Conferences with guests only are not recorded in history.
 - Talk cannot turn a recurring meeting into a single one or back; the plugin suggests cancelling and scheduling again.
 - `/talk` stays in autocomplete for everyone, even in test mode: Mattermost cannot hide a command per user.
