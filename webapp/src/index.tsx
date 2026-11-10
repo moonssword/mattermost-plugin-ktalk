@@ -3,6 +3,7 @@ import type {Store} from 'redux';
 
 import {discussPost, getConfig, loadConfig, runCommand, startMeeting} from './actions';
 import {addIncoming, meetingsVersion, removeIncoming, type IncomingCall} from './bus';
+import CallMenuRoot, {CallDropdownSublabel, HeaderCallButton, callButtonAction} from './components/call_menu';
 import IncomingCalls from './components/incoming_call';
 import {PersonalKeySetting} from './components/personal_key';
 import {AdminStatusPanel, LinkEmbed, PopoverCall, PopoverStatus, Toast} from './components/extras';
@@ -36,6 +37,7 @@ class Plugin {
         registry.registerPostTypeComponent('custom_konturtalk_rec', RecordingPost);
         registry.registerRootComponent(Toast);
         registry.registerRootComponent(IncomingCalls);
+        registry.registerRootComponent(CallMenuRoot);
         registry.registerAdminConsoleCustomSetting('ConnectionStatus', AdminStatusPanel, {showTitle: true});
 
         const refresh = async () => {
@@ -115,24 +117,18 @@ class Plugin {
             t('Контур.Толк'),
         ));
         keep(registry.registerCallButtonAction(
-            <button
-                className='btn btn-sm btn-tertiary call-button'
-                aria-label={t('Начать встречу в Контур.Толке')}
-                title={t('Начать встречу в Контур.Толке')}
-            >
-                <CameraIcon size={16}/>
-            </button>,
+            <HeaderCallButton/>,
             // Shown when another plugin, such as Calls, also has a call button:
             // the markup and classes match Mattermost's own menu items.
             <button className='style--none call-button-dropdown'>
                 <CameraIcon size={16}/>
                 <div>
                     <span className='call-button-label'>{t('Встреча в Контур.Толке')}</span>
-                    <span className='call-button-dropdown-sublabel'>{t('В этом канале')}</span>
+                    <span className='call-button-dropdown-sublabel'><CallDropdownSublabel/></span>
                 </div>
             </button>,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (channel: any) => startMeeting(store, channel?.id),
+            (channel: any) => callButtonAction(store, channel?.id),
             <CameraIcon size={16}/>,
             t('Контур.Толк'),
         ));
@@ -185,8 +181,8 @@ class Plugin {
                         type: 'radio',
                         default: 'default',
                         options: [
-                            option('default', 'Как у всех (выбирает администратор)'),
-                            option('current', 'Текущий'),
+                            option('default', 'По умолчанию (выбирает администратор)'),
+                            option('current', 'Системный'),
                             option('cards', 'Карточки'),
                             option('compact', 'Компактный'),
                         ],

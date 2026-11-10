@@ -4,6 +4,7 @@ import {useStore} from 'react-redux';
 import {showRecording} from '../actions';
 import {useT} from '../i18n';
 import {isTrustedCard, isWebUrl} from '../logic';
+import {useRecordingAccess} from '../recording_access';
 
 import {DocumentIcon, ExternalIcon} from './icons';
 import Markdown from './markdown';
@@ -19,6 +20,9 @@ const RecordingPost = ({post}: {post: any}) => {
     const trusted = isTrustedCard(post.user_id, config?.bot_user_id);
     const key = trusted ? post.props?.recording_key as string | undefined : undefined;
     const link = post.props?.recording_url as string | undefined;
+    // The summary, minutes and transcript open only for those Talk allows;
+    // the link to Talk stays, and Talk decides there.
+    const allowed = useRecordingAccess(key && config?.enabled ? [key] : []).has(key || '');
 
     return (
         <div
@@ -42,7 +46,16 @@ const RecordingPost = ({post}: {post: any}) => {
                             {t('Открыть в Толке')}
                         </a>
                     )}
-                    {config?.enabled && (
+                    {allowed && post.props?.is_summary && (
+                        <button
+                            className='ktk-btn ktk-btn--primary'
+                            onClick={() => showRecording(store, rhsActions.show, key, 'summary')}
+                        >
+                            <DocumentIcon/>
+                            {t('Пересказ')}
+                        </button>
+                    )}
+                    {allowed && (
                         <button
                             className='ktk-btn ktk-btn--secondary'
                             onClick={() => showRecording(store, rhsActions.show, key, 'protocol')}
@@ -51,7 +64,7 @@ const RecordingPost = ({post}: {post: any}) => {
                             {t('Протокол')}
                         </button>
                     )}
-                    {config?.enabled && (
+                    {allowed && (
                         <button
                             className='ktk-btn ktk-btn--secondary'
                             onClick={() => showRecording(store, rhsActions.show, key, 'transcript')}

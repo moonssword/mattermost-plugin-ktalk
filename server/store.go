@@ -14,21 +14,22 @@ const (
 	casRetries      = 8
 	finishedKeepFor = 90 * 24 * time.Hour
 
-	keyMeeting  = "meeting:"
-	keyRoom     = "room:"
-	keyConf     = "conf:"
-	keyRec      = "rec:"
-	keyChannel  = "chan:"
-	keyPersonal = "personal:"
-	keyPAT      = "pat:"
-	keyUserMap  = "umap:"
-	keyStatus   = "ustat:"
-	keyEvent    = "event:"
-	keyAlert    = "alert:"
-	keyActive   = "active"
-	keyWebhook  = "webhook"
-	keyActivate = "webhook_activation"
-	keySecret   = "secret:"
+	keyMeeting   = "meeting:"
+	keyRoom      = "room:"
+	keyConf      = "conf:"
+	keyRec       = "rec:"
+	keyRecAccess = "racc:"
+	keyChannel   = "chan:"
+	keyPersonal  = "personal:"
+	keyPAT       = "pat:"
+	keyUserMap   = "umap:"
+	keyStatus    = "ustat:"
+	keyEvent     = "event:"
+	keyAlert     = "alert:"
+	keyActive    = "active"
+	keyWebhook   = "webhook"
+	keyActivate  = "webhook_activation"
+	keySecret    = "secret:"
 )
 
 var errMeetingNotFound = errors.New("meeting not found")

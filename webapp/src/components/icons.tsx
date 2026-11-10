@@ -27,14 +27,14 @@ export const CameraIcon = ({size = 18, className}: {size?: number; className?: s
     </svg>
 );
 
-const Line = ({size = 14, children}: {size?: number; children: React.ReactNode}) => (
+const Line = ({size = 14, weight = 2, children}: {size?: number; weight?: number; children: React.ReactNode}) => (
     <svg
         width={size}
         height={size}
         viewBox='0 0 24 24'
         fill='none'
         stroke='currentColor'
-        strokeWidth='2'
+        strokeWidth={weight}
         strokeLinecap='round'
         strokeLinejoin='round'
         aria-hidden='true'
@@ -43,7 +43,7 @@ const Line = ({size = 14, children}: {size?: number; children: React.ReactNode})
     </svg>
 );
 
-type IconProps = {size?: number};
+type IconProps = {size?: number; weight?: number};
 
 export const CalendarIcon = ({size}: IconProps) => (
     <Line size={size}>
@@ -58,9 +58,12 @@ export const CalendarIcon = ({size}: IconProps) => (
     </Line>
 );
 
-export const PhoneIcon = ({size}: IconProps) => (
-    <Line size={size}>
-        <path d='M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'/>
+export const PhoneIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <path d='M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z'/>
     </Line>
 );
 
@@ -152,5 +155,53 @@ export const RoomIcon = ({size}: IconProps) => (
     <Line size={size}>
         <path d='M3 12 12 4l9 8'/>
         <path d='M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9'/>
+    </Line>
+);
+
+export const LinkIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <path d='M10.336 13.664a5.06 5.06 0 0 0 6.659 0L18.659 12a4.709 4.709 0 0 0-6.66-6.66m1.665 4.996a5.06 5.06 0 0 0-6.66 0L5.342 12A4.709 4.709 0 0 0 12 18.66'/>
+    </Line>
+);
+
+export const ChevronLeftIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <path d='M15 5l-7 7 7 7'/>
+    </Line>
+);
+
+/** Something still being prepared. */
+export const ClockIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <circle
+            cx='12'
+            cy='12'
+            r='9'
+        />
+        <path d='M12 7v5l3 2'/>
+    </Line>
+);
+
+/** Something that will not come. */
+export const UnavailableIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <circle
+            cx='12'
+            cy='12'
+            r='9'
+        />
+        <path d='M5.6 5.6l12.8 12.8'/>
     </Line>
 );

@@ -74,15 +74,21 @@ type MeetingAttendee struct {
 
 // Schedule holds calendar data of a scheduled meeting.
 type Schedule struct {
-	Email          string            `json:"email"`
-	UsePersonalKey bool              `json:"use_personal_key,omitempty"`
-	EventID        string            `json:"event_id"`
-	Start          time.Time         `json:"start"`
-	End            time.Time         `json:"end"`
-	Timezone       string            `json:"timezone,omitempty"`
-	Description    string            `json:"description,omitempty"`
-	Repeat         string            `json:"repeat,omitempty"`
-	RepeatCount    int               `json:"repeat_count,omitempty"`
+	Email          string    `json:"email"`
+	UsePersonalKey bool      `json:"use_personal_key,omitempty"`
+	EventID        string    `json:"event_id"`
+	Start          time.Time `json:"start"`
+	End            time.Time `json:"end"`
+	Timezone       string    `json:"timezone,omitempty"`
+	Description    string    `json:"description,omitempty"`
+	Repeat         string    `json:"repeat,omitempty"`
+	RepeatCount    int       `json:"repeat_count,omitempty"`
+	// Rule is the full repeat; meetings planned before it existed have only
+	// Repeat and RepeatCount.
+	Rule *RepeatRule `json:"rule,omitempty"`
+	// OrganizerKey is the organizer of the event as Talk reports it, read on
+	// every calendar refresh. Cards use it; actions ask Talk again.
+	OrganizerKey   string            `json:"organizer_key,omitempty"`
 	Recurring      bool              `json:"recurring,omitempty"`
 	UserIDs        []string          `json:"user_ids,omitempty"`
 	UserKeys       []string          `json:"user_keys,omitempty"`
@@ -108,6 +114,39 @@ type MeetingRecording struct {
 	SummaryDone bool   `json:"summary_done,omitempty"`
 }
 
+// Who may open a recording started from Mattermost, as Talk words it.
+const (
+	accessSelf         = "self"         // only the person who started it
+	accessParticipants = "participants" // those present: Talk grants them itself
+	accessDomain       = "domain"       // anyone in the space with the link
+	accessGlobal       = "global"       // anyone on the internet with the link
+)
+
+func validAccess(access string) bool {
+	switch access {
+	case accessSelf, accessParticipants, accessDomain, accessGlobal:
+		return true
+	}
+	return false
+}
+
+// linkScope is the link access in Talk that an access choice starts with.
+func linkScope(access string) string {
+	if access == accessDomain || access == accessGlobal {
+		return access
+	}
+	return "none"
+}
+
+// RecordingChoice is the access chosen when a recording was started.
+type RecordingChoice struct {
+	Access string `json:"access"`
+	// Owner is the Talk user who keeps a recording limited to themselves.
+	Owner string `json:"owner,omitempty"`
+	// UserID is who chose, told if Talk refuses the access.
+	UserID string `json:"user_id,omitempty"`
+}
+
 // MeetingResults are the materials of a finished conference.
 type MeetingResults struct {
 	URL      string   `json:"url,omitempty"`
@@ -121,41 +160,44 @@ type MeetingResults struct {
 // Meeting is the plugin's record of a Talk room used from a channel, stored in
 // KV as is. Clients only ever receive the allowlisted view from view().
 type Meeting struct {
-	ID             string             `json:"id"`
-	RoomName       string             `json:"room_name"`
-	URL            string             `json:"url"`
-	Title          string             `json:"title"`
-	ChannelID      string             `json:"channel_id"`
-	RootID         string             `json:"root_id,omitempty"`
-	PostID         string             `json:"post_id"`
-	CreatorID      string             `json:"creator_id"`
-	CreatorName    string             `json:"creator_name"`
-	CreatorKey     string             `json:"creator_key,omitempty"`
-	Kind           string             `json:"kind"`
-	Status         string             `json:"status"`
-	LinkOnly       bool               `json:"link_only,omitempty"`
-	CreatedAt      time.Time          `json:"created_at"`
-	StartedAt      *time.Time         `json:"started_at,omitempty"`
-	EndedAt        *time.Time         `json:"ended_at,omitempty"`
-	UsersOnline    int                `json:"users_online"`
-	Online         []string           `json:"online,omitempty"`
-	Present        []string           `json:"present,omitempty"`
-	Moderators     []string           `json:"moderators,omitempty"`
-	Pin            string             `json:"pin,omitempty"`
-	GuestsUntil    *time.Time         `json:"guests_until,omitempty"`
-	Lobby          bool               `json:"lobby,omitempty"`
-	Muted          bool               `json:"muted,omitempty"`
-	SIP            *talk.SIPSettings  `json:"sip,omitempty"`
-	Recording      bool               `json:"recording,omitempty"`
-	Callees        []CallCallee       `json:"callees,omitempty"`
-	Schedule       *Schedule          `json:"schedule,omitempty"`
-	Results        *MeetingResults    `json:"results,omitempty"`
-	Recordings     []MeetingRecording `json:"recordings,omitempty"`
-	ConferenceKey  string             `json:"conference_key,omitempty"`
-	RingingUntil   time.Time          `json:"ringing_until"`
-	EmptyPolls     int                `json:"empty_polls,omitempty"`
-	ArtifactPollAt time.Time          `json:"artifact_poll_at"`
-	Expired        bool               `json:"expired,omitempty"`
+	ID          string             `json:"id"`
+	RoomName    string             `json:"room_name"`
+	URL         string             `json:"url"`
+	Title       string             `json:"title"`
+	ChannelID   string             `json:"channel_id"`
+	RootID      string             `json:"root_id,omitempty"`
+	PostID      string             `json:"post_id"`
+	CreatorID   string             `json:"creator_id"`
+	CreatorName string             `json:"creator_name"`
+	CreatorKey  string             `json:"creator_key,omitempty"`
+	Kind        string             `json:"kind"`
+	Status      string             `json:"status"`
+	LinkOnly    bool               `json:"link_only,omitempty"`
+	CreatedAt   time.Time          `json:"created_at"`
+	StartedAt   *time.Time         `json:"started_at,omitempty"`
+	EndedAt     *time.Time         `json:"ended_at,omitempty"`
+	UsersOnline int                `json:"users_online"`
+	Online      []string           `json:"online,omitempty"`
+	Present     []string           `json:"present,omitempty"`
+	Moderators  []string           `json:"moderators,omitempty"`
+	Pin         string             `json:"pin,omitempty"`
+	GuestsUntil *time.Time         `json:"guests_until,omitempty"`
+	Lobby       bool               `json:"lobby,omitempty"`
+	Muted       bool               `json:"muted,omitempty"`
+	SIP         *talk.SIPSettings  `json:"sip,omitempty"`
+	Recording   bool               `json:"recording,omitempty"`
+	Callees     []CallCallee       `json:"callees,omitempty"`
+	Schedule    *Schedule          `json:"schedule,omitempty"`
+	Results     *MeetingResults    `json:"results,omitempty"`
+	Recordings  []MeetingRecording `json:"recordings,omitempty"`
+	// RecordingChoices are the accesses chosen for recordings started from
+	// Mattermost, by recording key. They stay on the server.
+	RecordingChoices map[string]RecordingChoice `json:"recording_choices,omitempty"`
+	ConferenceKey    string                     `json:"conference_key,omitempty"`
+	RingingUntil     time.Time                  `json:"ringing_until"`
+	EmptyPolls       int                        `json:"empty_polls,omitempty"`
+	ArtifactPollAt   time.Time                  `json:"artifact_poll_at"`
+	Expired          bool                       `json:"expired,omitempty"`
 }
 
 // view returns what clients may see. It is an allowlist: a new Meeting field
@@ -221,7 +263,7 @@ func (m *Meeting) rawView() map[string]any {
 	}
 	if sc := m.Schedule; sc != nil {
 		v["schedule"] = map[string]any{
-			"start": sc.Start, "end": sc.End, "description": sc.Description, "repeat": sc.Repeat,
+			"start": sc.Start, "end": sc.End, "description": sc.Description, "repeat": sc.Repeat, "repeat_text": sc.repeatText(),
 			"recurring": sc.Recurring, "auto_record": sc.AutoRecord, "attendees": sc.Attendees,
 			// Mattermost users invited, so their clients can offer to answer.
 			"invited": sc.UserIDs,
@@ -430,8 +472,13 @@ func timezoneLabel(t time.Time) string {
 }
 
 // safeInline stops user or Talk text in bot posts from triggering mentions.
+// markdownEscaper neutralizes text placed inside Markdown the plugin writes.
+// Mentions are broken with a zero-width space; link and emphasis marks are
+// escaped, so a title such as "x](https://evil) [y" cannot smuggle a link.
+var markdownEscaper = strings.NewReplacer("@", "@\u200b", "\\", "\\\\", "[", "\\[", "]", "\\]", "`", "\\`", "*", "\\*", "_", "\\_", "~", "\\~")
+
 func safeInline(s string) string {
-	return strings.ReplaceAll(s, "@", "@\u200b")
+	return markdownEscaper.Replace(s)
 }
 
 func clip(s string, limit int) string {
@@ -457,4 +504,16 @@ func (sc *Schedule) answers() map[string]string {
 		}
 	}
 	return out
+}
+
+// repeatText describes how the meeting repeats, "" for a single meeting.
+// Meetings planned before rules existed are described by their period.
+func (sc *Schedule) repeatText() string {
+	if sc.Rule != nil {
+		return sc.Rule.Text()
+	}
+	if !sc.Recurring || sc.Repeat == "" {
+		return ""
+	}
+	return legacyRule(sc.Repeat, sc.RepeatCount, sc.Start).Text()
 }

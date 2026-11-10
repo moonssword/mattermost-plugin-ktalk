@@ -3,7 +3,7 @@ import type {Store} from 'redux';
 import {configStore, meetingsVersion, rhsRecording, showToast} from './bus';
 import {api, executeCommand} from './client';
 import {tFromState} from './i18n';
-import {isWebUrl} from './logic';
+import {isDesktopApp, isWebUrl} from './logic';
 import type {MeetingView, PluginConfig} from './types';
 
 export function getConfig(): PluginConfig | null {
@@ -19,12 +19,30 @@ export async function loadConfig(): Promise<PluginConfig | null> {
     return configStore.get();
 }
 
+function inDesktopApp(): boolean {
+    return isDesktopApp((window as unknown as {desktop?: unknown}).desktop, navigator.userAgent);
+}
+
+/**
+ * Opens a meeting or recording in the device's browser. The desktop app hands
+ * a web address opened this way to the system browser; anything else it keeps
+ * in a window of its own, without the camera and microphone the room needs.
+ */
+function openInBrowser(url: string) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 /**
  * Browsers block window.open outside of a click, and the meeting address is
- * only known after a request. So the window opens first and gets its address
- * when the answer arrives.
+ * only known after a request. So in a browser the window opens first and gets
+ * its address when the answer arrives. The desktop app has no such blocker,
+ * and would keep that blank window to itself, so there the address is opened
+ * once it is known.
  */
 function reserveWindow(): Window | null {
+    if (inDesktopApp()) {
+        return null;
+    }
     const features = getConfig()?.open_mode === 'window' ? 'width=1100,height=760' : undefined;
     return window.open('about:blank', '_blank', features);
 }
@@ -34,14 +52,19 @@ function finishWindow(target: Window | null, url: string) {
         target.opener = null;
         target.location.href = url;
     } else {
-        window.open(url, '_blank', 'noopener');
+        openInBrowser(url);
     }
 }
 
 export function openExternal(url: string) {
-    if (isWebUrl(url)) {
-        finishWindow(reserveWindow(), url);
+    if (!isWebUrl(url)) {
+        return;
     }
+    if (inDesktopApp()) {
+        openInBrowser(url);
+        return;
+    }
+    finishWindow(reserveWindow(), url);
 }
 
 async function withWindow(store: Store, work: () => Promise<{url: string}>) {
@@ -64,15 +87,18 @@ function currentContext(store: Store): {channelId: string; teamId: string} {
     return {channelId: state.entities.channels.currentChannelId, teamId: state.entities.teams.currentTeamId};
 }
 
-/** Starts a meeting. With the "ask" scheme the server shows a dialog instead. */
-export async function startMeeting(store: Store, channelId?: string, rootId = '') {
+/**
+ * Starts a meeting. In a direct or group chat it rings the others unless
+ * linkOnly is set. With the "ask" scheme the server shows a dialog instead.
+ */
+export async function startMeeting(store: Store, channelId?: string, rootId = '', linkOnly = false) {
     const context = currentContext(store);
     const channel = channelId || context.channelId;
     if (getConfig()?.naming === 'ask') {
-        await runCommand(store, '/talk start', channel, rootId);
+        await runCommand(store, linkOnly ? '/talk link' : '/talk start', channel, rootId);
         return;
     }
-    await withWindow(store, () => api<{url: string; meeting: MeetingView}>('POST', '/meetings', {channel_id: channel, root_id: rootId}));
+    await withWindow(store, () => api<{url: string; meeting: MeetingView}>('POST', '/meetings', {channel_id: channel, root_id: rootId, link_only: linkOnly}));
 }
 
 export async function discussPost(store: Store, postId: string) {
@@ -111,9 +137,9 @@ export async function runCommand(store: Store, command: string, channelId?: stri
     }
 }
 
-export async function meetingAction(id: string, action: string, done?: string) {
+export async function meetingAction(id: string, action: string, done?: string, body?: unknown) {
     try {
-        await api('POST', `/meetings/${id}/${action}`);
+        await api('POST', `/meetings/${id}/${action}`, body);
         meetingsVersion.set(meetingsVersion.get() + 1);
         if (done) {
             showToast(done);

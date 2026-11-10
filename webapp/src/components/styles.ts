@@ -19,7 +19,7 @@ export const CSS = `
   color:var(--k-fg);min-width:0;
 }
 
-/* ---- Base and style A, "Текущий": neutral, with status readable at a glance ---- */
+/* ---- Base and style A, "Системный": neutral, with status readable at a glance ---- */
 .ktk-card{position:relative;min-width:0;max-width:560px;margin:4px 0;padding:12px 16px;border:1px solid rgba(var(--k-fg-rgb),.16);border-radius:8px;background:var(--k-bg);box-shadow:0 1px 2px rgba(var(--k-fg-rgb),.05)}
 .ktk-card[data-state="live"]{border-color:rgba(var(--k-online-rgb),.5)}
 .ktk-card__head{display:flex;gap:12px;align-items:flex-start}
@@ -35,7 +35,12 @@ export const CSS = `
 .ktk-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--k-online)}
 .ktk-time{font-variant-numeric:tabular-nums}
 .ktk-rec{display:inline-flex;align-items:center;gap:5px;font-weight:600;color:var(--k-err)}
-.ktk-rec::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.ktk-rec::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor;animation:ktk-rec-pulse 2s ease-in-out infinite}
+@keyframes ktk-rec-pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(var(--k-err-rgb),.45)}50%{opacity:.35;box-shadow:0 0 0 4px rgba(var(--k-err-rgb),0)}}
+.ktk-caret{flex:none;margin-left:-2px;opacity:.7}
+.ktk-callmenu__title{padding:4px 16px 6px;font-size:12px;font-weight:600;color:rgba(var(--k-fg-rgb),.64)}
+.ktk-callmenu__radio{flex:none;width:14px;height:14px;margin-top:3px;border:1.5px solid rgba(var(--k-fg-rgb),.4);border-radius:50%}
+.ktk-callmenu__item[aria-checked="true"] .ktk-callmenu__radio{border-color:var(--k-btn);box-shadow:inset 0 0 0 3px var(--k-bg),inset 0 0 0 8px var(--k-btn)}
 /* The label column follows its content but never takes more than 40% of the
    card, so a long name or address wraps instead of squeezing the values out. */
 .ktk-rows{display:grid;grid-template-columns:fit-content(40%) minmax(0,1fr);gap:3px 12px;margin:10px 0 0;font-size:12px;line-height:18px;color:rgba(var(--k-fg-rgb),.72)}
@@ -87,6 +92,11 @@ export const CSS = `
 .ktk-btn.ktk-btn--icon{aspect-ratio:1;padding:0!important}
 .ktk-more{display:flex;margin-top:8px}
 .ktk-empty{padding:24px 8px;text-align:center;color:rgba(var(--k-fg-rgb),.64)}
+.ktk-empty--icon{display:flex;flex-direction:column;align-items:center;gap:10px;padding:40px 16px}
+.ktk-empty--icon>svg{color:rgba(var(--k-fg-rgb),.4)}
+.ktk-back{display:inline-flex;align-items:center;gap:2px;height:28px;margin-left:-6px;padding:0 10px 0 4px;border:0;border-radius:4px;background:none;color:rgba(var(--k-fg-rgb),.72);font-size:13px;font-weight:600;cursor:pointer;transition:background .12s ease,color .12s ease}
+.ktk-back:hover{background:rgba(var(--k-fg-rgb),.08);color:var(--k-fg)}
+.ktk-back:focus-visible{outline:2px solid var(--k-btn);outline-offset:1px}
 .ktk-input{width:100%;height:32px;margin-bottom:8px;padding:0 10px;border:1px solid rgba(var(--k-fg-rgb),.24);border-radius:4px;background:var(--k-bg);color:var(--k-fg)}
 .ktk-input::placeholder{color:rgba(var(--k-fg-rgb),.56)}
 .ktk-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:20px}
@@ -108,6 +118,16 @@ export const CSS = `
 .ktk-key__body{display:grid;flex:1;gap:8px;min-width:0}
 .ktk-key__body>.ktk-link{justify-self:start}
 .ktk-key__form{display:grid;gap:6px}
+.ktk-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.ktk-period{min-width:0;margin:0 0 10px;padding:0;border:0}
+.ktk-period__box{display:flex;align-items:center;gap:2px;height:32px;padding:0 4px 0 10px;border:1px solid rgba(var(--k-fg-rgb),.24);border-radius:4px;background:var(--k-bg);transition:border-color .12s ease,box-shadow .12s ease}
+.ktk-period__box:hover{border-color:rgba(var(--k-fg-rgb),.48)}
+.ktk-period__box:focus-within{border-color:var(--k-btn);box-shadow:inset 0 0 0 1px var(--k-btn)}
+.ktk-period__box input{flex:1 1 0;min-width:0;height:100%;padding:0;border:0;background:transparent;color:var(--k-fg);font:inherit;font-size:13px;font-variant-numeric:tabular-nums;outline:none}
+.ktk-period__box input::-webkit-calendar-picker-indicator{margin-left:2px;padding:3px;border-radius:4px;opacity:.45;cursor:pointer}
+.ktk-period__box input::-webkit-calendar-picker-indicator:hover{opacity:.8;background-color:rgba(var(--k-fg-rgb),.08)}
+.ktk-period__dash{flex:none;padding:0 6px;color:rgba(var(--k-fg-rgb),.48)}
+.ktk-period__hint{margin-top:4px;font-size:11.5px;line-height:16px;color:rgba(var(--k-fg-rgb),.56)}
 .ktk-key .ktk-input{margin:0}
 .ktk-key__error{font-size:12px;line-height:16px;color:var(--k-err)}
 .ktk-key__hint{font-size:12px;line-height:16px;color:rgba(var(--k-fg-rgb),.64)}
@@ -185,6 +205,7 @@ export const CSS = `
 [data-ktk-style="cards"] .ktk-item__meta{margin-top:4px}
 [data-ktk-style="cards"] .ktk-item__actions .ktk-btn{height:30px;padding:0 12px;font-size:12.5px}
 [data-ktk-style="cards"] .ktk-input{height:34px;border-color:var(--k-line-strong);border-radius:10px}
+[data-ktk-style="cards"] .ktk-period__box{height:34px;border-color:var(--k-line-strong);border-radius:10px}
 [data-ktk-style="cards"] .ktk-empty{margin:0 0 12px;padding:28px 16px;border:1px dashed var(--k-line-strong);border-radius:14px}
 [data-ktk-style="cards"] .ktk-section-title{margin:8px 2px;color:var(--k-btn)}
 [data-ktk-style="cards"] .ktk-line{margin-bottom:6px;padding:8px 12px;border:1px solid var(--k-line);border-radius:12px;background:var(--k-bg)}
@@ -232,6 +253,8 @@ export const CSS = `
 [data-ktk-style="compact"] .ktk-item__actions .ktk-btn:not(.ktk-btn--icon) svg{display:none}
 [data-ktk-style="compact"] .ktk-answer{border-radius:3px}
 [data-ktk-style="compact"] .ktk-input{height:30px;font-size:13px}
+[data-ktk-style="compact"] .ktk-period__box{height:30px}
+[data-ktk-style="compact"] .ktk-period__box input{font-size:12.5px}
 [data-ktk-style="compact"] .ktk-section-title{margin:10px 0 2px}
 /* One column: a side column for names would take a third of a narrow panel. */
 [data-ktk-style="compact"] .ktk-line{padding:5px 0;border-bottom:1px solid rgba(var(--k-fg-rgb),.06)}
@@ -245,6 +268,14 @@ export const CSS = `
 /* ---- Incoming call: a floating card in the language of the "ringing" card ---- */
 /* The component places the stack under the channel header, inside the center
    column. These values are the fallback for views without that column. */
+.ktk-callmenu{position:fixed;z-index:1100;max-width:calc(100vw - 16px);padding:8px 0;border:1px solid rgba(var(--k-fg-rgb),.16);border-radius:8px;background:var(--k-bg);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.ktk-callmenu__item{display:flex;align-items:flex-start;gap:10px;width:calc(100% - 8px);margin:0 4px;padding:8px 12px;border-radius:6px;border:0;background:none;color:var(--k-fg);text-align:left;font:inherit;cursor:pointer}
+.ktk-callmenu__item>svg{flex:none;margin-top:1px;color:rgba(var(--k-fg-rgb),.56)}
+.ktk-callmenu__item:hover>svg,.ktk-callmenu__item:focus-visible>svg{color:var(--k-btn)}
+.ktk-callmenu__item:hover,.ktk-callmenu__item:focus-visible{background:rgba(var(--k-fg-rgb),.08);outline:none}
+.ktk-callmenu__item:focus-visible{box-shadow:inset 0 0 0 2px rgba(var(--k-btn-rgb),.5)}
+.ktk-callmenu__label{display:block;font-size:14px;line-height:20px}
+.ktk-callmenu__hint{display:block;font-size:12px;line-height:16px;color:rgba(var(--k-fg-rgb),.64)}
 .ktk-incoming-stack{position:fixed;top:112px;right:16px;z-index:1100;display:flex;flex-direction:column;gap:8px;width:320px;max-width:calc(100vw - 32px)}
 .ktk-incoming{position:relative;overflow:hidden;padding:12px 16px 14px;border:1px solid rgba(var(--k-fg-rgb),.16);border-radius:8px;background:var(--k-bg);box-shadow:0 8px 24px rgba(0,0,0,.16)}
 .ktk-incoming__head{display:flex;gap:12px;align-items:center}
@@ -287,6 +318,11 @@ export const CSS = `
    narrow layout stays, with padded icon buttons. */
 .ktk-rhs__head{flex-wrap:nowrap}
 .ktk-head__main{flex:1;min-width:0}
+.ktk-split{display:flex;gap:1px;min-width:0}
+.ktk-split>.ktk-btn.ktk-split__main{flex:1;min-width:0}
+.ktk-split>.ktk-btn.ktk-split__main:not(:last-child){border-top-right-radius:0;border-bottom-right-radius:0}
+.ktk-split>.ktk-btn.ktk-split__more{flex:none;padding:0 9px;border-top-left-radius:0;border-bottom-left-radius:0}
+.ktk-split__more .ktk-caret{margin:0;opacity:.9}
 .ktk-head__main span{overflow:hidden;text-overflow:ellipsis}
 .ktk-head__aux{flex:none}
 .ktk-wide{display:none}
@@ -312,7 +348,7 @@ export const CSS = `
 @keyframes ktk-skel-in{from{opacity:0}to{opacity:1}}
 @keyframes ktk-skel-pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
-@media (prefers-reduced-motion:reduce){
+@media (prefers-reduced-motion:reduce){.ktk-rec::before{animation:none}
   .ktk-skel,.ktk-skel__bar{animation:none}
   .ktk-incoming__avatar--ringing::after{animation:none;opacity:.6}
   [data-ktk-style="cards"] .ktk-card,[data-ktk-style="cards"] .ktk-item{transition:none}

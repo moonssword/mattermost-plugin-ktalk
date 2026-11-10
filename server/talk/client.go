@@ -64,7 +64,12 @@ func NewClient(spaceURL, token string) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(spaceURL, "/") + "/api",
 		token:   token,
-		http:    &http.Client{Timeout: requestTimeout},
+		http: &http.Client{
+			Timeout: requestTimeout,
+			// The key is sent as a header, which a redirect would carry to
+			// another host. The API never redirects, so none are followed.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}
 }
 
@@ -668,6 +673,7 @@ func (r *UserRef) Name() string {
 type RecordingFilter struct {
 	Query     string
 	StartFrom *time.Time
+	StartTo   *time.Time
 	PageToken string
 	Top       int
 }
@@ -687,6 +693,9 @@ func (c *Client) ListRecordings(ctx context.Context, f RecordingFilter) (*Record
 	}
 	if f.StartFrom != nil {
 		query.Set("startFrom", timeParam(*f.StartFrom))
+	}
+	if f.StartTo != nil {
+		query.Set("startTo", timeParam(*f.StartTo))
 	}
 	if f.PageToken != "" {
 		query.Set("pageTokenString", f.PageToken)
@@ -740,10 +749,60 @@ func (c *Client) GetActiveRecording(ctx context.Context, roomName string) (strin
 	return out.RecordingKey, nil
 }
 
+// RecordingAccess lists who may open a recording in Talk. The author is the
+// owner, and Talk adds the meeting's participants as viewers by itself.
+type RecordingAccess struct {
+	UserAccesses []RecordingUserAccess `json:"userAccesses"`
+	LinkAccess   *struct {
+		Scope string `json:"scope"`
+	} `json:"linkAccess,omitempty"`
+}
+
+// RecordingUserAccess is one person's role on a recording.
+type RecordingUserAccess struct {
+	User   User   `json:"user"`
+	RoleID string `json:"roleId"`
+}
+
+// Grants reports whether the Talk user with this key holds a role on the
+// recording. "none" is how Talk records a revoked grant.
+func (a *RecordingAccess) Grants(userKey string) bool {
+	if a == nil || userKey == "" {
+		return false
+	}
+	for i := range a.UserAccesses {
+		access := &a.UserAccesses[i]
+		if access.User.Key == userKey && access.RoleID != "" && access.RoleID != "none" {
+			return true
+		}
+	}
+	return false
+}
+
+// GetRecordingAccess returns the per-user grants of a recording.
+func (c *Client) GetRecordingAccess(ctx context.Context, key string) (*RecordingAccess, error) {
+	var out RecordingAccess
+	if err := c.do(ctx, http.MethodGet, "/Recordings/"+seg(key)+"/access", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SetRecordingLinkAccess sets link access to none, domain or global, keeping
 // individual accesses as they are.
 func (c *Client) SetRecordingLinkAccess(ctx context.Context, key, scope string) error {
 	body := map[string]any{"userAccesses": []any{}, "linkAccess": map[string]string{"scope": scope}}
+	return c.do(ctx, http.MethodPatch, "/Recordings/"+seg(key)+"/access", nil, body, nil)
+}
+
+// RestrictRecording sets link access and takes the grants of the given users
+// away. Talk records a revoked grant as the role "none".
+func (c *Client) RestrictRecording(ctx context.Context, key, scope string, revoke []string) error {
+	accesses := make([]map[string]string, 0, len(revoke))
+	for _, userKey := range revoke {
+		accesses = append(accesses, map[string]string{"userKey": userKey, "roleId": "none"})
+	}
+	body := map[string]any{"userAccesses": accesses, "linkAccess": map[string]string{"scope": scope}}
 	return c.do(ctx, http.MethodPatch, "/Recordings/"+seg(key)+"/access", nil, body, nil)
 }
 

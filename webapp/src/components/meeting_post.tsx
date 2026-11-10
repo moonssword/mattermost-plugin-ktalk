@@ -3,9 +3,12 @@ import {useSelector, useStore} from 'react-redux';
 
 import {meetingAction, openExternal, runCommand, showRecording} from '../actions';
 import {useLocale, useT} from '../i18n';
-import {canJoin, chipKind, formatClock, initials, isTrustedCard, isWebUrl, personColor, repeatText, secondsBetween} from '../logic';
+import {canJoin, chipKind, formatClock, initials, isTrustedCard, isWebUrl, onlineText, personColor, repeatLabel, secondsBetween} from '../logic';
+import {useRecordingAccess} from '../recording_access';
+import {useMeetingRights, type MeetingRights} from '../meeting_rights';
 import type {MeetingView} from '../types';
 
+import Dropdown from './dropdown';
 import {CalendarIcon, CameraIcon, CheckIcon, CopyIcon, DocumentIcon, EditIcon, ExternalIcon, PhoneIcon, RecordIcon, StopIcon} from './icons';
 import Markdown from './markdown';
 import {rhsActions} from './rhs_handle';
@@ -63,23 +66,6 @@ function useNow(active: boolean): number {
 
 // Moderation buttons are a convenience: the server checks rights again. A plain
 // member sees none of them because the server would refuse anyway.
-function useCanControl(meeting: MeetingView | undefined): boolean {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return useSelector((state: any) => {
-        if (!meeting) {
-            return false;
-        }
-        const users = state.entities.users;
-        const userId = users.currentUserId;
-        if (userId === meeting.creator_id) {
-            return true;
-        }
-        if ((users.profiles[userId]?.roles || '').includes('system_admin')) {
-            return true;
-        }
-        return Boolean(state.entities.channels.membersInChannel?.[meeting.channel_id]?.[userId]?.scheme_admin);
-    });
-}
 
 function CopyButton({url}: {url: string}) {
     const t = useT();
@@ -212,7 +198,7 @@ function SelfRow({meeting, status}: {meeting: MeetingView; status: string}) {
 }
 
 /** Attendees of a scheduled meeting, with the current user's row answerable. */
-function AttendeeRows({meeting}: {meeting: MeetingView}) {
+function AttendeeRows({meeting, rights}: {meeting: MeetingView; rights: MeetingRights}) {
     const t = useT();
     const config = useConfig();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -222,9 +208,9 @@ function AttendeeRows({meeting}: {meeting: MeetingView}) {
         return null;
     }
     const attendees = schedule.attendees || [];
-    const ownKey = schedule.keys?.[userId] || '';
-    const answerable = Boolean(ownKey) && meeting.status === 'scheduled' && (schedule.invited || []).includes(userId) &&
-        userId !== meeting.creator_id && Boolean(config?.personal_keys);
+    // Talk says who is invited; its organizer has nothing to answer.
+    const ownKey = rights.key;
+    const answerable = rights.attendee && Boolean(ownKey) && meeting.status === 'scheduled' && Boolean(config?.personal_keys);
     const given = schedule.answers?.[userId] || '';
     const listed = answerable && attendees.some((attendee) => attendee.key === ownKey);
     return (
@@ -256,6 +242,14 @@ function AttendeeRows({meeting}: {meeting: MeetingView}) {
     );
 }
 
+/** The accesses Talk offers when a recording starts, in its own words. */
+const RECORDING_ACCESS = [
+    {value: 'self', label: 'Только мне', hint: 'Больше никто не откроет запись'},
+    {value: 'participants', label: 'Только присутствующим', hint: 'Тем, кто был на встрече'},
+    {value: 'domain', label: 'Всем в пространстве по ссылке', hint: 'Сотрудникам, у кого есть ссылка'},
+    {value: 'global', label: 'Всем в интернете по ссылке', hint: 'Любому со ссылкой, даже без аккаунта'},
+];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MeetingPost = ({post}: {post: any}) => {
     const t = useT();
@@ -268,7 +262,10 @@ const MeetingPost = ({post}: {post: any}) => {
     const live = meeting?.status === 'live';
     const scheduled = meeting?.status === 'scheduled';
     const now = useNow(Boolean(live || scheduled));
-    const canControl = useCanControl(meeting) && Boolean(config?.enabled);
+    // Talk decides who controls a meeting; the server asks it for this user.
+    const rights = useMeetingRights(meeting?.id, meeting?.status, Boolean(config?.enabled));
+    // Buttons for recordings go only to those Talk lets open them.
+    const allowedRecordings = useRecordingAccess(config?.enabled ? (meeting?.recordings || []).map((recording) => recording.key) : []);
 
     if (!meeting) {
         return <Markdown text={post.message || ''}/>;
@@ -284,6 +281,7 @@ const MeetingPost = ({post}: {post: any}) => {
         results.boards ? `${t('Доски')}: ${results.boards}` : '',
     ].filter(Boolean).join(' · ') : '';
     const showCallees = meeting.status !== 'ended' && meeting.status !== 'cancelled';
+    const recordings = (meeting.recordings || []).filter((recording) => allowedRecordings.has(recording.key));
 
     return (
         <div
@@ -321,7 +319,7 @@ const MeetingPost = ({post}: {post: any}) => {
                     {meeting.schedule && (
                         <Row label={t('Когда')}>
                             {dateTime.format(new Date(meeting.schedule.start))}
-                            {meeting.schedule.recurring && ` · ${t(repeatText(meeting.schedule.repeat))}`}
+                            {meeting.schedule.recurring && ` · ${repeatLabel(meeting.schedule.repeat_text, meeting.schedule.repeat, locale, t)}`}
                             {meeting.schedule.auto_record && ` · ${t('Автозапись')}`}
                         </Row>
                     )}
@@ -334,7 +332,7 @@ const MeetingPost = ({post}: {post: any}) => {
                     {live && meeting.users_online > 0 && (
                         <Row label={t('В комнате')}>
                             <Avatars names={meeting.online || []}/>
-                            {(meeting.online || []).join(', ') || meeting.users_online}
+                            {onlineText(meeting.online || [], meeting.users_online)}
                         </Row>
                     )}
                     {!closed && meeting.pin && <Row label={t('ПИН-код')}>{meeting.pin}</Row>}
@@ -356,7 +354,12 @@ const MeetingPost = ({post}: {post: any}) => {
                             />
                         </Row>
                     ))}
-                    {!closed && <AttendeeRows meeting={meeting}/>}
+                    {!closed && (
+                        <AttendeeRows
+                            meeting={meeting}
+                            rights={rights}
+                        />
+                    )}
                     {results?.attended && results.attended.length > 0 && <Row label={t('Были на встрече')}>{results.attended.join(', ')}</Row>}
                     {results?.missed && results.missed.length > 0 && <Row label={t('Не пришли')}>{results.missed.join(', ')}</Row>}
                     {materials && <Row label={t('Материалы')}>{materials}</Row>}
@@ -386,17 +389,32 @@ const MeetingPost = ({post}: {post: any}) => {
                             {t('Итоги в Толке')}
                         </a>
                     )}
-                    {config?.enabled && meeting.recordings?.map((recording, index, all) => (
+                    {config?.enabled && recordings.length === 1 && (
                         <button
-                            key={recording.key}
                             className='ktk-btn ktk-btn--secondary'
-                            onClick={() => showRecording(store, rhsActions.show, recording.key, 'summary')}
+                            onClick={() => showRecording(store, rhsActions.show, recordings[0].key, 'summary')}
                         >
                             <DocumentIcon/>
-                            {t('Запись')}{all.length > 1 ? ` ${index + 1}` : ''}
+                            {t('Запись')}
                         </button>
-                    ))}
-                    {canControl && !meeting.link_only && meeting.status === 'ringing' && (
+                    )}
+                    {config?.enabled && recordings.length > 1 && (
+                        <Dropdown
+                            className='ktk-btn ktk-btn--secondary'
+                            label={t('Записи встречи')}
+                            items={recordings.map((recording, index) => ({
+                                key: recording.key,
+                                icon: <DocumentIcon size={16}/>,
+                                label: `${t('Запись')} ${index + 1}`,
+                                hint: recording.duration ? formatClock(recording.duration) : undefined,
+                                onSelect: () => showRecording(store, rhsActions.show, recording.key, 'summary'),
+                            }))}
+                        >
+                            <DocumentIcon/>
+                            {`${t('Записи')} · ${recordings.length}`}
+                        </Dropdown>
+                    )}
+                    {rights.ring && !meeting.link_only && meeting.status === 'ringing' && (
                         <button
                             className='ktk-btn ktk-btn--danger'
                             onClick={() => meetingAction(meeting.id, 'cancel-call')}
@@ -405,16 +423,24 @@ const MeetingPost = ({post}: {post: any}) => {
                             {t('Отменить звонок')}
                         </button>
                     )}
-                    {canControl && live && !meeting.link_only && !meeting.recording && (
-                        <button
+                    {rights.room && live && !meeting.link_only && !meeting.recording && (
+                        <Dropdown
                             className='ktk-btn ktk-btn--secondary'
-                            onClick={() => meetingAction(meeting.id, 'record')}
+                            label={t('Начать запись')}
+                            title={t('Запись будет доступна')}
+                            items={RECORDING_ACCESS.map((option) => ({
+                                key: option.value,
+                                label: t(option.label),
+                                hint: t(option.hint),
+                                selected: option.value === (config?.recording_access || 'participants'),
+                                onSelect: () => meetingAction(meeting.id, 'record', undefined, {access: option.value}),
+                            }))}
                         >
                             <RecordIcon/>
                             {t('Начать запись')}
-                        </button>
+                        </Dropdown>
                     )}
-                    {canControl && live && !meeting.link_only && (
+                    {rights.room && live && !meeting.link_only && (
                         <button
                             className='ktk-btn ktk-btn--danger'
                             onClick={() => {
@@ -427,7 +453,7 @@ const MeetingPost = ({post}: {post: any}) => {
                             {t('Завершить для всех')}
                         </button>
                     )}
-                    {canControl && scheduled && (
+                    {rights.schedule && scheduled && (
                         <button
                             className='ktk-btn ktk-btn--secondary'
                             onClick={() => runCommand(store, `/talk schedule edit ${meeting.id}`, meeting.channel_id)}
@@ -436,7 +462,7 @@ const MeetingPost = ({post}: {post: any}) => {
                             {t('Изменить')}
                         </button>
                     )}
-                    {canControl && scheduled && (
+                    {rights.schedule && scheduled && (
                         <button
                             className='ktk-btn ktk-btn--danger'
                             onClick={() => {

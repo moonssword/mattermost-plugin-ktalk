@@ -1,14 +1,16 @@
-import React, {useCallback, useEffect, useState, useSyncExternalStore} from 'react';
+import React, {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {useStore} from 'react-redux';
 
 import {openExternal, openPersonalRoom, runCommand, startMeeting} from '../actions';
 import {meetingsVersion, rhsRecording} from '../bus';
-import {api, ApiError} from '../client';
+import {api, ApiError, isNetworkError, NETWORK_ERROR} from '../client';
 import {useLocale, useT} from '../i18n';
-import {filterTranscript, formatClock, repeatText, secondsBetween, speakerColors} from '../logic';
+import {clampPeriod, defaultPeriod, filterTranscript, formatClock, periodBounds, repeatLabel, secondsBetween, speakerColors} from '../logic';
 import type {MeetingView, RecordingArtifacts, RecordingItem, UpcomingEvent} from '../types';
 
-import {CalendarIcon, CameraIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, RoomIcon} from './icons';
+import {useCallPlace} from './call_menu';
+import Dropdown from './dropdown';
+import {CalendarIcon, CameraIcon, ChevronLeftIcon, ClockIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, PhoneIcon, RoomIcon, UnavailableIcon} from './icons';
 import Markdown from './markdown';
 import {PersonalKeyPanel} from './personal_key';
 import {useConfig, useVisualStyle} from './use_style';
@@ -20,14 +22,37 @@ interface LoadError {
     code: string;
 }
 
+/** Pauses before each retry of a request that did not reach the server. */
+const RETRY_MS = [2000, 5000, 15000];
+
+/**
+ * Loads a list and keeps it. A request that never reached the server, for
+ * example while the plugin restarts, is retried quietly and the last list
+ * stays on screen; only a list that never loaded explains the trouble.
+ */
 function useLoad<T>(path: string, deps: unknown[] = []) {
     const [data, setData] = useState<T | null>(null);
     const [error, setError] = useState<LoadError | null>(null);
+    const retry = useRef<ReturnType<typeof setTimeout>>();
+    const attempt = useRef(0);
+    const loaded = useRef(false);
     const reload = useCallback(async () => {
+        clearTimeout(retry.current);
         try {
             setData(await api<T>('GET', path));
             setError(null);
+            loaded.current = true;
+            attempt.current = 0;
         } catch (e) {
+            if (isNetworkError(e) && attempt.current < RETRY_MS.length) {
+                retry.current = setTimeout(reload, RETRY_MS[attempt.current]);
+                attempt.current++;
+                return;
+            }
+            attempt.current = 0;
+            if (isNetworkError(e) && loaded.current) {
+                return; // The list on screen stays; the next refresh tries again.
+            }
             setError({message: (e as Error).message, code: (e as ApiError).code || ''});
         }
     }, [path]);
@@ -35,6 +60,7 @@ function useLoad<T>(path: string, deps: unknown[] = []) {
         reload();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reload, ...deps]);
+    useEffect(() => () => clearTimeout(retry.current), []);
     return {data, error, reload};
 }
 
@@ -61,8 +87,13 @@ function useThrottledVersion(interval: number): number {
     return shown;
 }
 
-function Empty({text}: {text: string}) {
-    return <div className='ktk-empty'>{text}</div>;
+function Empty({text, icon}: {text: string; icon?: React.ReactNode}) {
+    return (
+        <div className={'ktk-empty' + (icon ? ' ktk-empty--icon' : '')}>
+            {icon}
+            <span>{text}</span>
+        </div>
+    );
 }
 
 /**
@@ -112,6 +143,18 @@ function Skeleton({kind = 'list', rows = 3}: {kind?: 'list' | 'text'; rows?: num
  * reads as advice. Anything else is an error.
  */
 function Problem({error}: {error: LoadError}) {
+    const t = useT();
+    if (error.code === NETWORK_ERROR) {
+        return (
+            <div
+                className='ktk-notice'
+                role='status'
+            >
+                <InfoIcon size={16}/>
+                <span>{t('Нет связи с сервером. Повторим автоматически.')}</span>
+            </div>
+        );
+    }
     if (!error.code) {
         return <div className='ktk-error'>{error.message}</div>;
     }
@@ -247,7 +290,7 @@ function UpcomingTab({onCount}: {onCount: (count: number) => void}) {
                     <div className='ktk-item__meta'>
                         <span>{format.format(new Date(event.start))}</span>
                         {event.external && <span>{event.external}</span>}
-                        {event.recurring && <span>{t(repeatText(event.repeat))}</span>}
+                        {event.recurring && <span>{repeatLabel(event.repeat_text, event.repeat, locale, t)}</span>}
                     </div>
                     {(event.url || event.meeting_id) && (
                         <div className='ktk-item__actions'>
@@ -284,6 +327,7 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
     const locale = useLocale();
     const [query, setQuery] = useState('');
     const [debounced, setDebounced] = useState('');
+    const [period, setPeriod] = useState(() => defaultPeriod());
     const [items, setItems] = useState<RecordingItem[] | null>(null);
     const [next, setNext] = useState('');
     const [error, setError] = useState('');
@@ -293,7 +337,7 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
         return () => clearTimeout(timer);
     }, [query]);
 
-    const load = useCallback(async (page: string, previous: RecordingItem[]) => {
+    const load = useCallback(async (page: string, previous: RecordingItem[], retried = false): Promise<void> => {
         try {
             const params = new URLSearchParams();
             if (debounced) {
@@ -302,18 +346,39 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
             if (page) {
                 params.set('page', page);
             }
+            const bounds = periodBounds(period.from, period.to);
+            params.set('from', bounds.from);
+            params.set('to', bounds.to);
             const result = await api<{recordings: RecordingItem[]; next_page: string}>('GET', `/recordings?${params}`);
             setItems([...previous, ...result.recordings]);
             setNext(result.next_page);
             setError('');
         } catch (e) {
-            setError((e as Error).message);
+            // A dropped connection is retried once quietly before it is shown.
+            if (isNetworkError(e) && !retried) {
+                setTimeout(() => load(page, previous, true), RETRY_MS[1]);
+                return;
+            }
+            setError(isNetworkError(e) ? t('Нет связи с сервером. Обновите вкладку чуть позже.') : (e as Error).message);
         }
-    }, [debounced]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [debounced, period]);
 
     useEffect(() => {
+        setItems(null);
         load('', []);
     }, [load]);
+
+    const today = defaultPeriod().to;
+    const changePeriod = (end: 'from' | 'to', value: string) => {
+        if (!value) {
+            return;
+        }
+        const next = end === 'from' ? clampPeriod(value, period.to, 'from') : clampPeriod(period.from, value, 'to');
+        if (next.from !== period.from || next.to !== period.to) {
+            setPeriod(next);
+        }
+    };
 
     const format = new Intl.DateTimeFormat(locale, {dateStyle: 'medium', timeStyle: 'short'});
     return (
@@ -325,9 +390,33 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
             />
+            <fieldset className='ktk-period'>
+                <legend className='ktk-sr'>{t('Период, не больше месяца')}</legend>
+                <div className='ktk-period__box'>
+                    <input
+                        type='date'
+                        aria-label={t('Начало периода')}
+                        value={period.from}
+                        max={today}
+                        onChange={(e) => changePeriod('from', e.target.value)}
+                    />
+                    <span
+                        className='ktk-period__dash'
+                        aria-hidden='true'
+                    >{'–'}</span>
+                    <input
+                        type='date'
+                        aria-label={t('Конец периода')}
+                        value={period.to}
+                        max={today}
+                        onChange={(e) => changePeriod('to', e.target.value)}
+                    />
+                </div>
+                <div className='ktk-period__hint'>{t('Период не больше месяца')}</div>
+            </fieldset>
             {error && <div className='ktk-error'>{error}</div>}
             {!items && !error && <Skeleton/>}
-            {items?.length === 0 && <Empty text={t('Записей пока нет.')}/>}
+            {items?.length === 0 && <Empty text={t(debounced ? 'Ничего не найдено за этот период.' : 'За этот период записей нет.')}/>}
             {items?.map((item) => (
                 <div
                     className='ktk-item'
@@ -390,8 +479,26 @@ function participantsText(count: number, t: (text: string) => string): string {
     return `${count} ${t(word)}`;
 }
 
-function speechMessage(status: string): string {
-    return status === 'inProgress' || status === 'recreateInProgress' ? 'Ещё готовится.' : 'Недоступно для этой записи.';
+/** Why a summary, the minutes or the transcript is not there, with its mark. */
+function SpeechEmpty({status}: {status: string}) {
+    const t = useT();
+    const pending = status === 'inProgress' || status === 'recreateInProgress';
+    return (
+        <Empty
+            text={t(pending ? 'Ещё готовится.' : 'Недоступно для этой записи.')}
+            icon={pending ? (
+                <ClockIcon
+                    size={28}
+                    weight={1.6}
+                />
+            ) : (
+                <UnavailableIcon
+                    size={28}
+                    weight={1.6}
+                />
+            )}
+        />
+    );
 }
 
 function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKey: string; section: string; onBack: () => void}) {
@@ -421,7 +528,7 @@ function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKe
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                 />
-                {(data.transcript.lines || []).length === 0 && <Empty text={t(speechMessage(data.transcript.status))}/>}
+                {(data.transcript.lines || []).length === 0 && <SpeechEmpty status={data.transcript.status}/>}
                 {(data.transcript.lines || []).length > 0 && lines.length === 0 && <Empty text={t('Ничего не найдено.')}/>}
                 {lines.map((line, index) => (
                     <div
@@ -451,17 +558,21 @@ function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKe
                 text={summary.text}
                 className='ktk-text body'
             />
-        ) : <Empty text={t(speechMessage(summary.status))}/>;
+        ) : <SpeechEmpty status={summary.status}/>;
     }
 
     return (
         <>
             <div className='ktk-rhs__actions'>
                 <button
-                    className='ktk-link'
+                    className='ktk-back'
                     onClick={onBack}
                 >
-                    {'← '}{t('Назад')}
+                    <ChevronLeftIcon
+                        size={16}
+                        weight={1.8}
+                    />
+                    {t('Назад')}
                 </button>
             </div>
             <div className='ktk-rhs__scroll'>
@@ -494,6 +605,7 @@ const Sidebar = () => {
     const store = useStore();
     const style = useVisualStyle();
     const config = useConfig();
+    const place = useCallPlace();
     const [tab, setTab] = useState('now');
     const [visited, setVisited] = useState<Record<string, boolean>>({now: true, upcoming: true});
     const [counts, setCounts] = useState<Record<string, number>>({});
@@ -518,15 +630,40 @@ const Sidebar = () => {
                 {/* A narrow panel keeps the main action labelled and turns the
                     others into icons; a wide one labels all three briefly. */}
                 <div className='ktk-rhs__actions ktk-rhs__head'>
-                    <button
-                        className='ktk-btn ktk-btn--primary ktk-head__main'
-                        aria-label={t('Начать встречу')}
-                        onClick={() => startMeeting(store)}
-                    >
-                        <CameraIcon size={14}/>
-                        <span className='ktk-narrow'>{t('Начать встречу')}</span>
-                        <span className='ktk-wide'>{t('Начать')}</span>
-                    </button>
+                    {/* The main part posts the meeting link to the chat; where
+                        calls are possible, the arrow offers to ring instead. */}
+                    <div className='ktk-split ktk-head__main'>
+                        <button
+                            className='ktk-btn ktk-btn--primary ktk-split__main'
+                            aria-label={t('Начать встречу')}
+                            title={place.rings ? t('Отправить ссылку на встречу в этот чат') : undefined}
+                            onClick={() => startMeeting(store, undefined, '', true)}
+                        >
+                            <CameraIcon size={14}/>
+                            <span className='ktk-narrow'>{t('Начать встречу')}</span>
+                            <span className='ktk-wide'>{t('Начать')}</span>
+                        </button>
+                        {place.rings && (
+                            <Dropdown
+                                className='ktk-btn ktk-btn--primary ktk-split__more'
+                                label={t('Другие способы начать встречу')}
+                                items={[{
+                                    key: 'call',
+                                    icon: (
+                                        <PhoneIcon
+                                            size={18}
+                                            weight={1.6}
+                                        />
+                                    ),
+                                    label: t('Позвонить'),
+                                    hint: t(place.group ? 'Участникам чата придёт входящий звонок' : 'Собеседнику придёт входящий звонок'),
+                                    onSelect: () => startMeeting(store, undefined, '', false),
+                                }]}
+                            >
+                                <span className='ktk-sr'>{t('Другие способы начать встречу')}</span>
+                            </Dropdown>
+                        )}
+                    </div>
                     {!config?.link_only && (
                         <button
                             className='ktk-btn ktk-btn--secondary ktk-head__aux'

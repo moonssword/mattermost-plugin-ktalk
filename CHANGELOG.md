@@ -4,6 +4,45 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- A period filter on the *Recordings* tab, up to a month long and the last 30 days by default. The server refuses longer periods.
+- In direct and group messages the call button asks whether to ring or only post a meeting link. In channels it posts the link straight away. `/talk link [topic]` does the same from the keyboard.
+- The *In the room* row on a card adds "+N" for connections without a name, such as unnamed guests or a second device.
+
+### Changed
+
+- *Start* in the sidebar posts a meeting link without ringing. In a direct or group chat with calls allowed, an arrow next to it offers *Call*; in channels it stays a single button.
+- The repeat of a scheduled meeting is chosen as in Talk's own form: *Weekdays*, *Every day*, *Weekly on <the day of the first meeting>*, *Monthly on <its date>* or *Other…*, which opens the period (days, weeks, months), the interval, the days of the week and the end, on a date or after a number of meetings. A line under the choice says what it comes to, for example "Every two weeks on Mondays and Thursdays until 31.12.2026", and cards and the *Upcoming* tab use the same wording. Meetings planned earlier keep their repeat and open in the new form when edited.
+- *Start recording* on a card asks who may open the recording, with Talk's own choices: only me, those present, anyone in the space with the link, anyone on the internet with the link. Talk accepts the access only once a recording is finished, so the plugin applies it then and messages the person who started the recording if Talk refuses. The *Default recording access* setting picks the preselected choice and the access of automatic recordings; recordings started in Talk keep the access chosen there.
+- A running recording is marked by a slowly pulsing red dot, which stays still for people who prefer reduced motion.
+- Several recordings of one meeting share one *Recordings* button with a menu instead of a button each.
+- The period filter on the *Recordings* tab is a single compact field.
+- *Back* in the recording view is a quiet button with a chevron instead of a link with an arrow.
+- "Still being prepared" and "Not available for this recording" are centred under a light clock or crossed-circle icon.
+- A request that does not reach the server, for example while the plugin restarts, is retried quietly and the list on screen stays; "Failed to fetch" is no longer shown.
+- The *Current* style is now called *System*, since it follows Mattermost's own look, and the per-user choice *Same as everyone* is now *Default*. Saved settings keep working.
+
+### Fixed
+
+- In a direct or group chat with calls turned off, the call menu said "Link in this channel"; it now says "Link in this chat". The label also follows the plugin settings once they load, instead of keeping what it showed before.
+- In the Mattermost desktop app, meetings and recordings opened in a window of the app instead of the device's browser. The plugin no longer opens a blank window first there, so the app hands the address to the system browser.
+
+### Security
+
+- Rights over meetings come from Talk instead of Mattermost roles. Recording, ending for everyone, the PIN, guest access and the waiting room are for the room's moderators in Talk; changing or cancelling a scheduled meeting is for the organizer of its event; answering an invitation is for its attendees in Talk. Channel admins and system admins no longer get any of these, and the meeting's creator gets them only as far as Talk does. Each action asks Talk when it is made, and cards show controls according to the same answer.
+- Buttons for a recording on cards and in the meeting thread are shown only to those who may open it in Talk; others no longer see buttons that would refuse them.
+- Users who sign in through SAML, LDAP or OAuth are matched to Talk by the address from the identity provider even when Mattermost has not marked it verified. Password accounts still need a verified address.
+- Talk is now the only source of access to recordings. The plugin shows a recording, its summary, minutes and transcript only to a Talk user who holds a role on it in Talk: its author, the meeting's participants and anyone the owner shared it with. Channel membership no longer grants access, and system administrators get no exception. Users whose verified address is not found in Talk see no recordings.
+- New recordings are no longer opened to the whole space. *Recording link access* now defaults to *Do not change*, so Talk keeps its own access rules; installations that saved another value keep it.
+- The summary is no longer posted as text to the meeting thread, which the whole channel reads. The thread gets a notice with a *Summary* button, and the text opens only for those Talk allows.
+- A personal key is refused when the Mattermost user has no matching Talk user, and the owner's name must match in full; before, a key was taken on trust in the first case and a partial name was enough in the second.
+- The participant search of the scheduling form checks that the user belongs to the team it searches; the plugin API does not check that by itself.
+- Direct calls respect the server's direct message policy: with messages limited to team members, a call to someone in another team is refused instead of opening a channel.
+- The space address must use HTTPS, except for a server on the same machine, and the API client no longer follows redirects, so the key cannot leave the space's host.
+- Titles and other text written into Markdown by the plugin have link and emphasis marks escaped, so a renamed recording cannot plant a link in the thread.
+- Recording grants are cached for a minute and listed in smaller pages, so one request to the *Recordings* tab makes at most a hundred requests to Talk.
+
 ## [0.5.1] - 2026-11-09
 
 ### Changed

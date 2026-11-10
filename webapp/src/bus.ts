@@ -30,6 +30,17 @@ export const meetingsVersion = createStore(0);
 
 export const toastMessage = createStore<string>('');
 
+/** The call menu of a direct or group chat, placed under the button that opened it. */
+export interface CallMenu {
+    channelId: string;
+    group: boolean;
+    top: number;
+    left: number;
+    anchor: HTMLElement | null;
+}
+
+export const callMenu = createStore<CallMenu | null>(null);
+
 export interface IncomingCall {
     meeting_id: string;
     channel_id: string;

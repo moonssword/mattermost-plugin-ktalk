@@ -74,7 +74,9 @@ type createRequest struct {
 	PostID    string `json:"post_id"`
 	Title     string `json:"title"`
 	RoomName  string `json:"room_name"`
-	Kind      string `json:"kind"`
+	// LinkOnly posts the meeting card in a direct or group chat without
+	// ringing anyone. Other channels never ring.
+	LinkOnly bool `json:"link_only"`
 }
 
 func (p *Plugin) checkCanStart(user *model.User, channelID string) error {
@@ -129,11 +131,11 @@ func (p *Plugin) startMeeting(userID string, req createRequest) (*Meeting, error
 
 	title := clip(req.Title, maxTitleLength)
 	if title == "" {
-		title = defaultTitle(channel, user)
+		title = defaultTitle(channel, user, req.LinkOnly)
 	}
 
 	kind := kindAdhoc
-	if (channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup) && cfg.EnableCalls {
+	if (channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup) && cfg.EnableCalls && !req.LinkOnly {
 		kind = kindCall
 	}
 
@@ -190,8 +192,11 @@ func (p *Plugin) newRoomName(userID string, channel *model.Channel) string {
 	return generateRoomName(scheme, cfg.RoomPrefix, teamName, channelName)
 }
 
-func defaultTitle(channel *model.Channel, user *model.User) string {
+func defaultTitle(channel *model.Channel, user *model.User, linkOnly bool) string {
 	if channel.Type == model.ChannelTypeDirect || channel.Type == model.ChannelTypeGroup {
+		if linkOnly {
+			return "Встреча: " + user.GetDisplayName(model.ShowFullName)
+		}
 		return "Звонок: " + user.GetDisplayName(model.ShowFullName)
 	}
 	return "Встреча: " + channel.DisplayName
@@ -606,11 +611,47 @@ func (p *Plugin) startDirectCall(callerID, targetID string) (*Meeting, error) {
 	if callerID == targetID {
 		return nil, newUserError(http.StatusBadRequest, "Нельзя позвонить самому себе.")
 	}
+	target, appErr := p.API.GetUser(targetID)
+	if appErr != nil || target.IsBot || target.DeleteAt != 0 {
+		return nil, newUserError(http.StatusNotFound, "Пользователь не найден.")
+	}
+	if !p.mayMessageDirectly(callerID, targetID) {
+		return nil, newUserError(http.StatusForbidden, "Личные сообщения с этим пользователем недоступны.")
+	}
 	channel, appErr := p.API.GetDirectChannel(callerID, targetID)
 	if appErr != nil {
 		return nil, fmt.Errorf("direct channel: %w", appErr)
 	}
 	return p.startMeeting(callerID, createRequest{ChannelID: channel.Id})
+}
+
+// mayMessageDirectly applies the server's direct message policy. Opening a
+// direct channel through the plugin API skips the check Mattermost makes for
+// its own clients, so when messages are limited to team members, the two
+// must share a team.
+func (p *Plugin) mayMessageDirectly(userID, otherID string) bool {
+	config := p.API.GetConfig()
+	if config == nil || config.TeamSettings.RestrictDirectMessage == nil || *config.TeamSettings.RestrictDirectMessage != model.DirectMessageTeam {
+		return true
+	}
+	mine, appErr := p.API.GetTeamsForUser(userID)
+	if appErr != nil {
+		return false
+	}
+	theirs, appErr := p.API.GetTeamsForUser(otherID)
+	if appErr != nil {
+		return false
+	}
+	shared := map[string]bool{}
+	for _, team := range mine {
+		shared[team.Id] = true
+	}
+	for _, team := range theirs {
+		if shared[team.Id] {
+			return true
+		}
+	}
+	return false
 }
 
 // personalRoom returns the user's persistent room URL, creating it once.
@@ -645,35 +686,13 @@ func (p *Plugin) personalRoom(user *model.User) (string, error) {
 	return cfg.roomURL(roomName), nil
 }
 
-// canControl reports whether a user may manage a meeting: its creator, a
-// channel admin or a system admin. Membership alone is not enough.
-func (p *Plugin) canControl(userID string, m *Meeting) bool {
-	if userID == m.CreatorID || p.API.HasPermissionTo(userID, model.PermissionManageSystem) {
-		return true
-	}
-	member, appErr := p.API.GetChannelMember(m.ChannelID, userID)
-	return appErr == nil && member.SchemeAdmin
-}
-
+// canView reports whether a user may see a meeting and what came out of it,
+// recordings included: only members of its channel. Read permission is not
+// used on purpose, because system admins hold it in every channel without
+// being members, and the plugin must not open recordings to them.
 func (p *Plugin) canView(userID string, m *Meeting) bool {
-	return p.API.HasPermissionToChannel(userID, m.ChannelID, model.PermissionReadChannel)
-}
-
-func (p *Plugin) controlledMeeting(userID, meetingID string) (*Meeting, error) {
-	m, err := p.getMeeting(meetingID)
-	if errors.Is(err, errMeetingNotFound) {
-		return nil, newUserError(http.StatusNotFound, "Встреча не найдена.")
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !p.canControl(userID, m) {
-		return nil, errForbidden
-	}
-	if m.LinkOnly {
-		return nil, newUserError(http.StatusConflict, "Встреча создана без API-ключа: управлять ей можно только в Толке.")
-	}
-	return m, nil
+	member, appErr := p.API.GetChannelMember(m.ChannelID, userID)
+	return appErr == nil && member != nil
 }
 
 func (p *Plugin) requireClient() (*talk.Client, error) {
@@ -708,7 +727,7 @@ func (p *Plugin) latestChannelMeeting(channelID string) (*Meeting, error) {
 
 // endMeeting ends the conference for everybody.
 func (p *Plugin) endMeeting(userID, meetingID string) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
 	}
@@ -735,7 +754,7 @@ func (p *Plugin) cancelRinging(userID, meetingID string) error {
 	if err != nil {
 		return err
 	}
-	if !p.canControl(userID, m) {
+	if !p.hasRight(userID, m, rightRing) {
 		return errForbidden
 	}
 	var stopped []string
@@ -769,9 +788,17 @@ func (p *Plugin) cancelRinging(userID, meetingID string) error {
 	return nil
 }
 
-// startRecording starts cloud recording for a running conference.
-func (p *Plugin) startRecording(userID, meetingID string) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+// startRecording starts cloud recording for a running conference. Talk takes
+// no access when starting and refuses to change it until the recording is
+// finished, so the choice is kept and applied when the recording is ready.
+func (p *Plugin) startRecording(userID, meetingID, access string) error {
+	if access == "" {
+		access = p.getConfig().defaultRecordingAccess()
+	}
+	if !validAccess(access) {
+		return newUserError(http.StatusBadRequest, "Неизвестный вариант доступа к записи.")
+	}
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
 	}
@@ -787,7 +814,8 @@ func (p *Plugin) startRecording(userID, meetingID string) error {
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
-	if _, err := client.StartRecording(ctx, m.RoomName, plainTitle(m.Title), initiator); err != nil {
+	key, err := client.StartRecording(ctx, m.RoomName, plainTitle(m.Title), initiator)
+	if err != nil {
 		// Talk explains refusals in Russian, for example that a room needs a
 		// registered participant, and that text is the useful answer here.
 		var apiErr *talk.Error
@@ -800,6 +828,12 @@ func (p *Plugin) startRecording(userID, meetingID string) error {
 	p.audit("startRecording", userID, m.ID)
 	updated, changed, err := p.updateMeeting(m.ID, func(m *Meeting) bool {
 		m.Recording = true
+		if key != "" {
+			if m.RecordingChoices == nil {
+				m.RecordingChoices = map[string]RecordingChoice{}
+			}
+			m.RecordingChoices[key] = RecordingChoice{Access: access, Owner: initiator, UserID: userID}
+		}
 		return true
 	})
 	if err != nil {
@@ -811,9 +845,53 @@ func (p *Plugin) startRecording(userID, meetingID string) error {
 	return nil
 }
 
+// applyRecordingChoice gives a finished recording the access chosen when it
+// was started. The person who chose is told when Talk refuses, since the
+// recording then keeps the space's default access.
+func (p *Plugin) applyRecordingChoice(client *talk.Client, key string, choice RecordingChoice) {
+	var err error
+	if choice.Access == accessSelf {
+		err = p.restrictToOwner(client, key, choice.Owner)
+	} else {
+		ctx, cancel := apiContext()
+		err = client.SetRecordingLinkAccess(ctx, key, linkScope(choice.Access))
+		cancel()
+	}
+	if appErr := p.API.KVDelete(keyRecAccess + key); appErr != nil {
+		p.API.LogWarn("Failed to drop cached recording access", "error", appErr.Error())
+	}
+	if err == nil {
+		return
+	}
+	p.noteAPIError(err)
+	p.API.LogError("Failed to apply recording access", "recording", key, "access", choice.Access, "error", err.Error())
+	if choice.UserID != "" {
+		p.dmUser(choice.UserID, fmt.Sprintf("Толк не изменил доступ к записи %s. Проверьте, кому она доступна, в Толке.", p.getConfig().recordingURL(key)))
+	}
+}
+
+// restrictToOwner leaves a recording to the person who started it: link
+// access off and every other grant revoked.
+func (p *Plugin) restrictToOwner(client *talk.Client, key, owner string) error {
+	ctx, cancel := apiContext()
+	defer cancel()
+	access, err := client.GetRecordingAccess(ctx, key)
+	if err != nil {
+		return err
+	}
+	revoke := []string{}
+	for i := range access.UserAccesses {
+		grant := &access.UserAccesses[i]
+		if grant.User.Key != "" && grant.User.Key != owner && grant.RoleID != "none" {
+			revoke = append(revoke, grant.User.Key)
+		}
+	}
+	return client.RestrictRecording(ctx, key, "none", revoke)
+}
+
 // setPin sets or removes the room PIN.
 func (p *Plugin) setPin(userID, meetingID, pin string) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
 	}
@@ -846,7 +924,7 @@ func validPin(pin string) bool {
 
 // setGuests opens the room to guests for some hours; zero closes it.
 func (p *Plugin) setGuests(userID, meetingID string, hours int) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
 	}
@@ -869,7 +947,7 @@ func (p *Plugin) setGuests(userID, meetingID string, hours int) error {
 
 // setLobby turns the waiting room on or off.
 func (p *Plugin) setLobby(userID, meetingID string, enabled bool) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
 	}

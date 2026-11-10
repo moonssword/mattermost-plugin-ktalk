@@ -233,3 +233,17 @@ func TestSetAttendeesSendsEmptyListsAsEmpty(t *testing.T) {
 		t.Fatalf("body %s", body)
 	}
 }
+
+func TestClientDoesNotFollowRedirects(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		t.Errorf("redirect followed with token %q", r.Header.Get("X-Auth-Token"))
+	}))
+	defer other.Close()
+	client := newServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/api/Users/profile", http.StatusFound)
+	}))
+	_, err := client.GetProfile(context.Background())
+	if !IsStatus(err, http.StatusFound) {
+		t.Fatalf("want the redirect as an error, got %v", err)
+	}
+}

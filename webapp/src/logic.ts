@@ -201,6 +201,17 @@ export function incomingAnchor(viewportWidth: number, center: Box | null, header
 }
 
 /** How a recurring meeting repeats, or the plain "recurring" when unknown. */
+/**
+ * How a meeting repeats, for display. The server words it in full in Russian,
+ * like Talk's form; other languages get the short period, which translates.
+ */
+export function repeatLabel(text: string | undefined, repeat: string | undefined, locale: string | undefined, t: (text: string) => string): string {
+    if (text && (locale || '').toLowerCase().startsWith('ru')) {
+        return text;
+    }
+    return t(repeatText(repeat));
+}
+
 export function repeatText(repeat: string | undefined): string {
     return ({daily: 'Ежедневно', weekly: 'Еженедельно', monthly: 'Ежемесячно'} as Record<string, string>)[repeat || ''] || 'Повторяется';
 }
@@ -218,4 +229,74 @@ export function speakerColors(speakers: string[]): Map<string, string> {
         }
     }
     return colors;
+}
+
+/** The longest recordings period, in days counted inclusively. */
+export const MAX_PERIOD_DAYS = 31;
+
+function dayValue(date: Date): string {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function parseDay(value: string): Date {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+}
+
+function addDays(value: string, days: number): string {
+    const date = parseDay(value);
+    date.setDate(date.getDate() + days);
+    return dayValue(date);
+}
+
+/** The default period: the last 30 days, today included. */
+export function defaultPeriod(today = new Date()): {from: string; to: string} {
+    const to = dayValue(today);
+    return {from: addDays(to, -(MAX_PERIOD_DAYS - 2)), to};
+}
+
+/**
+ * Keeps a period of local dates (YYYY-MM-DD) in order, no longer than
+ * MAX_PERIOD_DAYS and not in the future. The other end follows the one the
+ * user changed, so the edit is never undone.
+ */
+export function clampPeriod(from: string, to: string, changed: 'from' | 'to', today = new Date()): {from: string; to: string} {
+    const last = dayValue(today);
+    let start = from > last ? last : from;
+    let end = to > last ? last : to;
+    if (changed === 'from') {
+        if (end < start || addDays(start, MAX_PERIOD_DAYS - 1) < end) {
+            end = addDays(start, MAX_PERIOD_DAYS - 1);
+            end = end > last ? last : end;
+        }
+    } else if (end < start || addDays(end, -(MAX_PERIOD_DAYS - 1)) > start) {
+        start = addDays(end, -(MAX_PERIOD_DAYS - 1));
+    }
+    return {from: start, to: end};
+}
+
+/** Bounds of a period for the server: the start of the first day to the start of the day after the last. */
+export function periodBounds(from: string, to: string): {from: string; to: string} {
+    return {from: parseDay(from).toISOString(), to: parseDay(addDays(to, 1)).toISOString()};
+}
+
+/**
+ * Names of the people in the room. Talk counts every connection, so guests
+ * without a name and second devices show as "+N" rather than going unseen.
+ */
+export function onlineText(names: string[], count: number): string {
+    const extra = count - names.length;
+    if (names.length === 0) {
+        return String(count);
+    }
+    return extra > 0 ? `${names.join(', ')} +${extra}` : names.join(', ');
+}
+
+/**
+ * The Mattermost desktop app. Its preload script sets window.desktop, and its
+ * user agent names it; either is enough.
+ */
+export function isDesktopApp(bridge: unknown, userAgent: string): boolean {
+    return Boolean(bridge) || /\bMattermost\/\d/.test(userAgent);
 }

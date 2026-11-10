@@ -1,4 +1,4 @@
-import {canJoin, chipKind, cleanRecentStatuses, colorIndex, csrfFromCookie, effectiveStyle, filterTranscript, formatClock, incomingAnchor, initials, isSpaceLink, isTrustedCard, isWebUrl, PERSON_COLORS, repeatText, secondsBetween, speakerColors} from './logic';
+import {canJoin, chipKind, clampPeriod, cleanRecentStatuses, colorIndex, csrfFromCookie, defaultPeriod, effectiveStyle, filterTranscript, formatClock, incomingAnchor, initials, isDesktopApp, isSpaceLink, isTrustedCard, isWebUrl, onlineText, PERSON_COLORS, periodBounds, repeatLabel, repeatText, secondsBetween, speakerColors} from './logic';
 import type {MeetingView} from './types';
 
 const base = {status: 'waiting'} as MeetingView;
@@ -175,5 +175,65 @@ describe('speakerColors', () => {
         expect(colors.get('Иван')).toBe(PERSON_COLORS[0]);
         expect(colors.get('Мария')).toBe(PERSON_COLORS[1]);
         expect(colors.get('Вера')).toBe(PERSON_COLORS[2]);
+    });
+});
+
+describe('recording periods', () => {
+    const today = new Date(2026, 10, 9);
+
+    test('the default is the last 30 days', () => {
+        expect(defaultPeriod(today)).toEqual({from: '2026-10-11', to: '2026-11-09'});
+    });
+
+    test('moving the start pulls the end within a month', () => {
+        expect(clampPeriod('2026-08-01', '2026-11-09', 'from', today)).toEqual({from: '2026-08-01', to: '2026-08-31'});
+    });
+
+    test('moving the end pulls the start within a month', () => {
+        expect(clampPeriod('2026-08-01', '2026-10-15', 'to', today)).toEqual({from: '2026-09-15', to: '2026-10-15'});
+    });
+
+    test('an end before the start follows the start', () => {
+        expect(clampPeriod('2026-10-20', '2026-10-10', 'from', today)).toEqual({from: '2026-10-20', to: '2026-11-09'});
+    });
+
+    test('dates in the future become today', () => {
+        expect(clampPeriod('2026-11-01', '2026-12-01', 'to', today)).toEqual({from: '2026-11-01', to: '2026-11-09'});
+    });
+
+    test('a valid period is left alone', () => {
+        expect(clampPeriod('2026-10-01', '2026-10-31', 'to', today)).toEqual({from: '2026-10-01', to: '2026-10-31'});
+    });
+
+    test('bounds cover whole local days', () => {
+        const bounds = periodBounds('2026-10-01', '2026-10-31');
+        expect(new Date(bounds.from).getTime()).toBe(new Date(2026, 9, 1).getTime());
+        expect(new Date(bounds.to).getTime()).toBe(new Date(2026, 10, 1).getTime());
+    });
+});
+
+describe('onlineText', () => {
+    test('adds connections without a name as +N', () => {
+        expect(onlineText(['Анна', 'Борис'], 3)).toBe('Анна, Борис +1');
+        expect(onlineText(['Анна'], 1)).toBe('Анна');
+        expect(onlineText([], 2)).toBe('2');
+    });
+});
+
+describe('isDesktopApp', () => {
+    test('recognizes the desktop app by its bridge or user agent', () => {
+        const chrome = 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/128.0 Safari/537.36';
+        expect(isDesktopApp(undefined, chrome)).toBe(false);
+        expect(isDesktopApp({version: '5.11.0'}, chrome)).toBe(true);
+        expect(isDesktopApp(undefined, chrome.replace('Safari', 'Mattermost/5.11.0 Electron/33.0 Safari'))).toBe(true);
+    });
+});
+
+describe('repeatLabel', () => {
+    const t = (text: string) => ({Еженедельно: 'Weekly'} as Record<string, string>)[text] || text;
+    test('Russian gets the full wording, other languages the short period', () => {
+        expect(repeatLabel('Каждую неделю по вторникам до 10.12.2026', 'weekly', 'ru', t)).toBe('Каждую неделю по вторникам до 10.12.2026');
+        expect(repeatLabel('Каждую неделю по вторникам до 10.12.2026', 'weekly', 'en', t)).toBe('Weekly');
+        expect(repeatLabel(undefined, 'weekly', 'ru', (text) => text)).toBe('Еженедельно');
     });
 });

@@ -49,12 +49,16 @@ func (p *Plugin) emailProblem(user *model.User) *userError {
 }
 
 // talkEmail returns the address a user may act under in Talk. An unverified
-// address could be set to a colleague's and grant access to their calendar.
+// address could be set to a colleague's and grant access to their calendar
+// and recordings. Users who sign in through SAML, LDAP or OAuth get their
+// address from the identity provider on every sign-in and cannot change it in
+// Mattermost, which binds their account by that same address, so it counts
+// as verified whatever the flag says.
 func (p *Plugin) talkEmail(user *model.User) string {
 	if user == nil || user.IsBot || user.DeleteAt != 0 || user.Email == "" {
 		return ""
 	}
-	if p.getConfig().RequireVerifiedEmail && !user.EmailVerified {
+	if p.getConfig().RequireVerifiedEmail && !user.EmailVerified && !user.IsSSOUser() {
 		return ""
 	}
 	return strings.ToLower(user.Email)
@@ -244,7 +248,14 @@ func (p *Plugin) connectPersonalKey(userID, token string) (personalKey, error) {
 	if err != nil {
 		return personalKey{}, err
 	}
-	if identity, ok := p.talkUser(user); ok && !sameName(identity.Name, profile.Name()) {
+	// A personal key names no user key, so the owner is matched by name
+	// against the Talk user the address maps to. Without that user there is
+	// nothing to match, and the key is refused rather than taken on trust.
+	identity, ok := p.talkUser(user)
+	if !ok {
+		return personalKey{}, notInTalkError()
+	}
+	if !sameName(identity.Name, profile.Name()) {
 		return personalKey{}, newUserError(http.StatusBadRequest, "Это ключ другого пользователя Толка ("+profile.Name()+"). Выпустите ключ в своей учётной записи.")
 	}
 	now := time.Now().UTC()
@@ -263,7 +274,8 @@ func (p *Plugin) connectPersonalKey(userID, token string) (personalKey, error) {
 }
 
 // sameName compares two spellings of a person's name. Talk writes it as
-// "Name Surname" in one place and "Surname Name" in another.
+// "Name Surname" in one place and "Surname Name" in another, so the words are
+// compared as sets, and both sets must match in full.
 func sameName(a, b string) bool {
 	words := func(s string) map[string]bool {
 		out := map[string]bool{}
@@ -273,8 +285,8 @@ func sameName(a, b string) bool {
 		return out
 	}
 	x, y := words(a), words(b)
-	if len(x) == 0 || len(y) == 0 {
-		return true
+	if len(x) == 0 || len(y) == 0 || len(x) != len(y) {
+		return false
 	}
 	for w := range y {
 		if !x[w] {

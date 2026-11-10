@@ -8,6 +8,13 @@ export class ApiError extends Error {
     }
 }
 
+/** Marks a request that never reached the plugin: offline, a restart, a proxy. */
+export const NETWORK_ERROR = 'network';
+
+export function isNetworkError(error: unknown): boolean {
+    return (error as ApiError)?.code === NETWORK_ERROR;
+}
+
 function base(): string {
     return window.basename || '';
 }
@@ -20,15 +27,26 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     if (body !== undefined) {
         headers['Content-Type'] = 'application/json';
     }
-    const response = await fetch(base() + path, {
-        method,
-        headers,
-        credentials: 'include',
-        body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const data = await response.json().catch(() => ({}));
+    let response: Response;
+    try {
+        response = await fetch(base() + path, {
+            method,
+            headers,
+            credentials: 'include',
+            body: body === undefined ? undefined : JSON.stringify(body),
+        });
+    } catch {
+        // The browser says only "Failed to fetch": the server restarted, the
+        // connection dropped or the computer woke from sleep.
+        throw new ApiError('No connection to the server.', NETWORK_ERROR);
+    }
+    const data = await response.json().catch(() => null);
+    if (!response.ok && data === null && response.status >= 502 && response.status <= 504) {
+        // A proxy answered for a server that is restarting.
+        throw new ApiError(`HTTP ${response.status}`, NETWORK_ERROR);
+    }
     if (!response.ok) {
-        throw new ApiError(data.error || data.message || `HTTP ${response.status}`, data.code || '');
+        throw new ApiError(data?.error || data?.message || `HTTP ${response.status}`, data?.code || '');
     }
     return data as T;
 }

@@ -1,11 +1,12 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"sort"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -15,7 +16,6 @@ import (
 
 const (
 	syncInterval      = 30 * time.Second
-	maxSummaryRunes   = 6000
 	calendarLookAhead = 5 // Weeks to look for the next occurrence of a series.
 )
 
@@ -314,13 +314,21 @@ func (p *Plugin) announceRecording(client *talk.Client, meetingID string, rec *t
 	}
 	p.refreshCard(m)
 
-	if cfg.RecordingLinkAccess != "" {
+	// A recording started from Mattermost gets the access chosen then: Talk
+	// accepts it only now that the recording is finished. An automatic
+	// recording takes the administrator's default. A recording started in
+	// Talk keeps what its author chose there.
+	choice, chosen := m.RecordingChoices[rec.Key]
+	switch {
+	case chosen:
+		p.applyRecordingChoice(client, rec.Key, choice)
+	case !chosen && m.Schedule != nil && m.Schedule.AutoRecord:
 		ctx, cancel := apiContext()
-		defer cancel()
-		if err := client.SetRecordingLinkAccess(ctx, rec.Key, cfg.RecordingLinkAccess); err != nil {
+		if err := client.SetRecordingLinkAccess(ctx, rec.Key, linkScope(cfg.defaultRecordingAccess())); err != nil {
 			p.noteAPIError(err)
 			p.API.LogWarn("Failed to set recording access", "recording", rec.Key, "error", err.Error())
 		}
+		cancel()
 	}
 	if cfg.PostRecordings {
 		message := fmt.Sprintf("🎬 Запись встречи готова: [%s](%s)", safeInline(rec.Title), cfg.recordingURL(rec.Key))
@@ -363,11 +371,12 @@ func (p *Plugin) announceSummary(client *talk.Client, meetingID, key string) {
 	if err != nil || !claimed {
 		return
 	}
-	text := summary.Text()
-	if summary.Status != talk.SpeechSuccess || text == "" || !cfg.PostSummaries {
+	if summary.Status != talk.SpeechSuccess || summary.Text() == "" || !cfg.PostSummaries {
 		return
 	}
-	message := "📝 **Краткий пересказ встречи**\n\n" + safeInline(clip(text, maxSummaryRunes))
+	// The thread is read by the whole channel, so it gets a notice only. The
+	// text opens through the plugin, which asks Talk who may read it.
+	message := "📝 **Краткий пересказ встречи готов.** Открыть его могут автор записи и участники встречи."
 	p.botReply(m, message, postTypeRec, map[string]any{"meeting_id": m.ID, "recording_key": key, "recording_url": cfg.recordingURL(key), "is_summary": true})
 }
 
@@ -419,35 +428,95 @@ func (p *Plugin) syncSoon(meetingID string) {
 
 // --- Visibility of recordings ---
 
-// canAccessRecording decides who may read a recording through the plugin. The
-// space key sees every recording, so the plugin must not pass that on: a user
-// needs the meeting's channel, or to have made or attended the recording.
-func (p *Plugin) canAccessRecording(user *model.User, rec *talk.Recording) bool {
-	if p.API.HasPermissionTo(user.Id, model.PermissionManageSystem) {
-		return true
+// Talk decides who may see a recording: its author and the meeting's
+// participants hold roles on it, and its owner may share it further. The
+// plugin reads those grants and nothing else. Channel membership is not a
+// source: a channel may gain members who never took part, and Mattermost lets
+// system admins read every channel.
+
+// recordingViewer is the Talk user a Mattermost user reads recordings as. A
+// user without a verified address matched in Talk sees no recordings.
+func (p *Plugin) recordingViewer(user *model.User) (string, error) {
+	if problem := p.emailProblem(user); problem != nil {
+		return "", problem
 	}
-	if rec.RoomName != "" {
-		if m, err := p.getMeetingByIndex(keyRoom + rec.RoomName); err == nil && p.canView(user.Id, m) {
-			return true
-		}
+	identity, ok := p.talkUser(user)
+	if !ok || identity.Key == "" {
+		return "", newUserError(http.StatusForbidden, "Записи доступны только пользователям Толка: ваш адрес почты не найден в пространстве.")
 	}
-	email := p.talkEmail(user)
-	if email == "" {
+	return identity.Key, nil
+}
+
+// accessCacheTTL is how long the grants of a recording are remembered. The
+// list is reloaded on every visit to the tab, and each recording costs one
+// request to Talk, so a short memory keeps that from multiplying.
+const accessCacheTTL = time.Minute
+
+// recordingAccess returns the grants of a recording, from the cache when
+// they were read within accessCacheTTL.
+func (p *Plugin) recordingAccess(ctx context.Context, client *talk.Client, recordingKey string) (*talk.RecordingAccess, error) {
+	var cached talk.RecordingAccess
+	if found, err := p.kvGet(keyRecAccess+recordingKey, &cached); err == nil && found {
+		return &cached, nil
+	}
+	access, err := client.GetRecordingAccess(ctx, recordingKey)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.kvSet(keyRecAccess+recordingKey, access, accessCacheTTL); err != nil {
+		p.API.LogDebug("Recording access cache write failed", "error", err.Error())
+	}
+	return access, nil
+}
+
+// canAccessRecording asks Talk whether a Talk user holds a role on a recording.
+// Any doubt, an API error included, means no.
+func (p *Plugin) canAccessRecording(ctx context.Context, client *talk.Client, talkKey, recordingKey string) bool {
+	access, err := p.recordingAccess(ctx, client, recordingKey)
+	if err != nil {
+		p.noteAPIError(err)
+		p.API.LogWarn("Recording access unavailable", "recording", recordingKey, "error", err.Error())
 		return false
 	}
-	if rec.CreatedBy != nil && strings.EqualFold(rec.CreatedBy.Email, email) {
-		return true
+	return access.Grants(talkKey)
+}
+
+// accessibleRecordings keeps the recordings a Talk user may see, in order.
+// Grants are read in parallel, a few at a time.
+func (p *Plugin) accessibleRecordings(ctx context.Context, client *talk.Client, talkKey string, recs []talk.Recording) []talk.Recording {
+	const workers = 8
+	allowed := make([]bool, len(recs))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range min(workers, len(recs)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				allowed[i] = p.canAccessRecording(ctx, client, talkKey, recs[i].Key)
+			}
+		}()
 	}
-	for i := range rec.Participants {
-		if info := rec.Participants[i].UserInfo; info != nil && strings.EqualFold(info.Email, email) {
-			return true
+	for i := range recs {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	out := make([]talk.Recording, 0, len(recs))
+	for i := range recs {
+		if allowed[i] {
+			out = append(out, recs[i])
 		}
 	}
-	return false
+	return out
 }
 
 func (p *Plugin) recordingForUser(user *model.User, key string) (*talk.Recording, error) {
 	client, err := p.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	talkKey, err := p.recordingViewer(user)
 	if err != nil {
 		return nil, err
 	}
@@ -460,12 +529,8 @@ func (p *Plugin) recordingForUser(user *model.User, key string) (*talk.Recording
 	if err != nil {
 		return nil, p.describeAPIError("get recording", err)
 	}
-	if !p.canAccessRecording(user, rec) {
-		var byIndex *Meeting
-		byIndex, indexErr := p.getMeetingByIndex(keyRec + key)
-		if indexErr != nil || !p.canView(user.Id, byIndex) {
-			return nil, errForbidden
-		}
+	if !p.canAccessRecording(ctx, client, talkKey, key) {
+		return nil, errForbidden
 	}
 	return rec, nil
 }

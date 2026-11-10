@@ -49,6 +49,7 @@ func (p *Plugin) initRouter() http.Handler {
 	route("POST /api/v1/meetings", p.apiCreateMeeting)
 	route("GET /api/v1/meetings/active", p.apiActiveMeetings)
 	route("POST /api/v1/meetings/{id}/{action}", p.apiMeetingAction)
+	route("GET /api/v1/meetings/{id}/rights", p.apiMeetingRights)
 	route("POST /api/v1/calls", p.apiCreateCall)
 	route("GET /api/v1/personal-room", p.apiPersonalRoom)
 	route("GET /api/v1/upcoming", p.apiUpcoming)
@@ -57,6 +58,7 @@ func (p *Plugin) initRouter() http.Handler {
 	route("DELETE /api/v1/personal-key", p.apiDisconnectPersonalKey)
 	route("GET /api/v1/recordings", p.apiRecordings)
 	route("GET /api/v1/recordings/{key}/artifacts", p.apiRecordingArtifacts)
+	route("POST /api/v1/recordings/access", p.apiRecordingsAccess)
 	route("GET /api/v1/users/{id}/status", p.apiUserStatus)
 	route("GET /api/v1/preview", p.apiPreview)
 	route("POST /dialogs/start", p.dialogStart)
@@ -123,19 +125,20 @@ func (p *Plugin) apiConfig(w http.ResponseWriter, _ *http.Request, userID string
 	var stored personalKey
 	connected, _ := p.kvGet(keyPAT+userID, &stored)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":        p.userAllowed(userID),
-		"test_mode":      cfg.TestMode,
-		"style":          cfg.CardStyle,
-		"bot_user_id":    p.botUserID,
-		"configured":     cfg.spaceURL() != "",
-		"space_url":      cfg.spaceURL(),
-		"link_only":      p.client() == nil,
-		"naming":         p.userPref(userID, prefNaming, cfg.NamingScheme),
-		"open_mode":      p.userPref(userID, prefOpenMode, "tab"),
-		"calls":          cfg.EnableCalls,
-		"personal_keys":  cfg.AllowPersonalKeys,
-		"personal_key":   connected,
-		"join_opens_min": int(joinOpensBefore.Minutes()),
+		"enabled":          p.userAllowed(userID),
+		"test_mode":        cfg.TestMode,
+		"style":            cfg.CardStyle,
+		"bot_user_id":      p.botUserID,
+		"configured":       cfg.spaceURL() != "",
+		"space_url":        cfg.spaceURL(),
+		"link_only":        p.client() == nil,
+		"naming":           p.userPref(userID, prefNaming, cfg.NamingScheme),
+		"open_mode":        p.userPref(userID, prefOpenMode, "tab"),
+		"calls":            cfg.EnableCalls,
+		"personal_keys":    cfg.AllowPersonalKeys,
+		"personal_key":     connected,
+		"join_opens_min":   int(joinOpensBefore.Minutes()),
+		"recording_access": cfg.defaultRecordingAccess(),
 	})
 	return nil
 }
@@ -157,6 +160,23 @@ func (p *Plugin) apiCreateMeeting(w http.ResponseWriter, r *http.Request, userID
 		return err
 	}
 	p.meetingResponse(w, m)
+	return nil
+}
+
+// apiMeetingRights tells a card what to offer the user, as Talk sees them.
+// Only members of the meeting's channel may ask: that is where the card is.
+func (p *Plugin) apiMeetingRights(w http.ResponseWriter, r *http.Request, userID string) error {
+	m, err := p.getMeeting(r.PathValue("id"))
+	if errors.Is(err, errMeetingNotFound) {
+		return newUserError(http.StatusNotFound, "Встреча не найдена.")
+	}
+	if err != nil {
+		return err
+	}
+	if !p.canView(userID, m) {
+		return errForbidden
+	}
+	writeJSON(w, http.StatusOK, p.meetingRights(userID, m))
 	return nil
 }
 
@@ -182,7 +202,15 @@ func (p *Plugin) apiMeetingAction(w http.ResponseWriter, r *http.Request, userID
 	case "end":
 		err = p.endMeeting(userID, id)
 	case "record":
-		err = p.startRecording(userID, id)
+		var body struct {
+			Access string `json:"access"`
+		}
+		if r.ContentLength > 0 {
+			if err := decodeBody(r, &body); err != nil {
+				return err
+			}
+		}
+		err = p.startRecording(userID, id, body.Access)
 	case "cancel-call":
 		err = p.cancelRinging(userID, id)
 	case "cancel-schedule":
@@ -261,10 +289,45 @@ type recordingView struct {
 	Participants int       `json:"participants"`
 }
 
+// maxRecordingPeriod caps how long a period one recordings request covers, so
+// a search does not page through the whole history of the space. The web app
+// allows 31 whole days; one more absorbs clock changes in the user's zone.
+const maxRecordingPeriod = 32 * 24 * time.Hour
+
+// recordingPeriod reads from and to (RFC 3339) and defaults to the last 30
+// days. A longer period is refused rather than cut, so the user sees why.
+func recordingPeriod(query url.Values, now time.Time) (from, to time.Time, err error) {
+	to = now
+	if raw := query.Get("to"); raw != "" {
+		if to, err = time.Parse(time.RFC3339, raw); err != nil {
+			return from, to, newUserError(http.StatusBadRequest, "Неверная дата окончания периода.")
+		}
+	}
+	from = to.Add(-30 * 24 * time.Hour)
+	if raw := query.Get("from"); raw != "" {
+		if from, err = time.Parse(time.RFC3339, raw); err != nil {
+			return from, to, newUserError(http.StatusBadRequest, "Неверная дата начала периода.")
+		}
+	}
+	if !from.Before(to) {
+		return from, to, newUserError(http.StatusBadRequest, "Начало периода должно быть раньше конца.")
+	}
+	if to.Sub(from) > maxRecordingPeriod {
+		return from, to, newUserError(http.StatusBadRequest, "Период не может быть длиннее месяца.")
+	}
+	return from, to, nil
+}
+
 // apiRecordings pages through space recordings and keeps those the user may
 // see, reading further pages to fill the response when many are filtered out.
 func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID string) error {
-	const wanted, pageSize, maxPages = 20, 50, 5
+	// Each recording costs a request to Talk for its grants, so the pages
+	// are small and few: at most a hundred requests per call.
+	const wanted, pageSize, maxPages = 20, 25, 4
+	from, to, err := recordingPeriod(r.URL.Query(), time.Now())
+	if err != nil {
+		return err
+	}
 	client, err := p.requireClient()
 	if err != nil {
 		return err
@@ -273,8 +336,12 @@ func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID st
 	if appErr != nil {
 		return appErr
 	}
+	talkKey, err := p.recordingViewer(user)
+	if err != nil {
+		return err
+	}
 	cfg := p.getConfig()
-	filter := talk.RecordingFilter{Query: r.URL.Query().Get("q"), PageToken: r.URL.Query().Get("page"), Top: pageSize}
+	filter := talk.RecordingFilter{Query: r.URL.Query().Get("q"), StartFrom: &from, StartTo: &to, PageToken: r.URL.Query().Get("page"), Top: pageSize}
 	out := make([]recordingView, 0, wanted)
 	next := ""
 	ctx, cancel := apiContext()
@@ -284,11 +351,8 @@ func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID st
 		if err != nil {
 			return p.describeAPIError("list recordings", err)
 		}
-		for i := range result.Entities {
-			rec := &result.Entities[i]
-			if p.canAccessRecording(user, rec) {
-				out = append(out, recordingView{Key: rec.Key, Title: rec.Title, URL: cfg.recordingURL(rec.Key), CreatedDate: rec.CreatedDate, Duration: rec.Duration, Participants: rec.ParticipantsCount})
-			}
+		for _, rec := range p.accessibleRecordings(ctx, client, talkKey, result.Entities) {
+			out = append(out, recordingView{Key: rec.Key, Title: rec.Title, URL: cfg.recordingURL(rec.Key), CreatedDate: rec.CreatedDate, Duration: rec.Duration, Participants: rec.ParticipantsCount})
 		}
 		next = result.NextPageToken
 		if next == "" {
@@ -297,6 +361,51 @@ func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID st
 		filter.PageToken = next
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"recordings": out, "next_page": next})
+	return nil
+}
+
+// maxAccessKeys bounds one access question: a card holds a few recordings.
+const maxAccessKeys = 20
+
+// apiRecordingsAccess tells which of the given recordings the user may open,
+// so cards show buttons only to them. Any doubt answers no.
+func (p *Plugin) apiRecordingsAccess(w http.ResponseWriter, r *http.Request, userID string) error {
+	var req struct {
+		Keys []string `json:"keys"`
+	}
+	if err := decodeBody(r, &req); err != nil {
+		return err
+	}
+	if len(req.Keys) > maxAccessKeys {
+		return newUserError(http.StatusBadRequest, "Слишком много записей в одном запросе.")
+	}
+	allowed := make(map[string]bool, len(req.Keys))
+	for _, key := range req.Keys {
+		allowed[key] = false
+	}
+	client := p.client()
+	user, appErr := p.API.GetUser(userID)
+	if client == nil || appErr != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"access": allowed})
+		return nil
+	}
+	talkKey, err := p.recordingViewer(user)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"access": allowed})
+		return nil
+	}
+	ctx, cancel := apiContext()
+	defer cancel()
+	recs := make([]talk.Recording, 0, len(req.Keys))
+	for _, key := range req.Keys {
+		if key != "" {
+			recs = append(recs, talk.Recording{Key: key})
+		}
+	}
+	for _, rec := range p.accessibleRecordings(ctx, client, talkKey, recs) {
+		allowed[rec.Key] = true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"access": allowed})
 	return nil
 }
 
@@ -564,14 +673,15 @@ func (p *Plugin) dialogStart(w http.ResponseWriter, r *http.Request, userID stri
 		dialogFieldError(w, map[string]string{"room_name": "От 3 до 64 символов: строчные латинские буквы и цифры."})
 		return nil
 	}
-	m, err := p.startMeeting(userID, createRequest{ChannelID: req.ChannelId, RootID: req.State, Title: stringField(req.Submission, "title"), RoomName: roomName})
+	rootID, linkOnly := strings.CutPrefix(req.State, linkState)
+	m, err := p.startMeeting(userID, createRequest{ChannelID: req.ChannelId, RootID: rootID, Title: stringField(req.Submission, "title"), RoomName: roomName, LinkOnly: linkOnly})
 	if err != nil {
 		if dialogGeneralError(w, err) {
 			return nil
 		}
 		return err
 	}
-	p.API.SendEphemeralPost(userID, &model.Post{UserId: p.botUserID, ChannelId: req.ChannelId, RootId: req.State, Message: "Присоединиться к встрече: " + m.URL})
+	p.API.SendEphemeralPost(userID, &model.Post{UserId: p.botUserID, ChannelId: req.ChannelId, RootId: rootID, Message: "Присоединиться к встрече: " + m.URL})
 	writeJSON(w, http.StatusOK, model.SubmitDialogResponse{})
 	return nil
 }
@@ -601,7 +711,26 @@ func (p *Plugin) dialogSchedule(w http.ResponseWriter, r *http.Request, userID s
 	if err != nil {
 		return err
 	}
-	input, errs := parseScheduleSubmission(req.Submission, time.Now().UTC())
+	user, appErr := p.API.GetUser(userID)
+	if appErr != nil {
+		return appErr
+	}
+	if req.Type == "refresh" {
+		// A field with refresh changed: send the form back, rebuilt for it.
+		// Editing is checked here too, so the form is never offered for a
+		// meeting the user may not change, though saving would refuse anyway.
+		if meetingID, editing := strings.CutPrefix(req.State, "edit:"); editing {
+			if _, err := p.controlledMeeting(userID, meetingID, rightSchedule); err != nil {
+				if dialogGeneralError(w, err) {
+					return nil
+				}
+				return err
+			}
+		}
+		writeJSON(w, http.StatusOK, model.SubmitDialogResponse{Type: string(model.SubmitDialogResponseTypeForm), Form: refreshedScheduleDialog(req, userLocation(user))})
+		return nil
+	}
+	input, errs := parseScheduleSubmission(req.Submission, time.Now().UTC(), userLocation(user))
 	if ids, unknown := p.participantIDs(input.UserIDs); unknown != "" {
 		errs["participants"] = "Не найден пользователь: " + unknown
 	} else {
@@ -611,14 +740,10 @@ func (p *Plugin) dialogSchedule(w http.ResponseWriter, r *http.Request, userID s
 		dialogFieldError(w, errs)
 		return nil
 	}
-	user, appErr := p.API.GetUser(userID)
-	if appErr != nil {
-		return appErr
-	}
 
 	var actionErr error
 	if meetingID, editing := strings.CutPrefix(req.State, "edit:"); editing {
-		m, err := p.controlledMeeting(userID, meetingID)
+		m, err := p.controlledMeeting(userID, meetingID, rightSchedule)
 		if err == nil && m.Schedule != nil && m.Schedule.Recurring != (input.Repeat != "") {
 			// Talk refuses to turn a series into a single meeting or back.
 			dialogFieldError(w, map[string]string{"repeat": "Толк не меняет повторяющуюся встречу на разовую и наоборот. Отмените эту встречу и создайте новую."})

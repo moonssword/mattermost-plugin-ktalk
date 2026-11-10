@@ -98,7 +98,11 @@ func (p *Plugin) dialogUsers(w http.ResponseWriter, r *http.Request, userID stri
 		}
 		users, appErr = p.API.GetUsersInChannel(req.ChannelId, "username", 0, participantSearchLimit)
 	} else {
-		// The same reach as the standard user picker: the current team.
+		// The same reach as the standard user picker: the current team, and
+		// only for its members. The plugin API does not check that itself.
+		if req.TeamId == "" || !p.API.HasPermissionToTeam(userID, req.TeamId, model.PermissionViewTeam) {
+			return errForbidden
+		}
 		users, appErr = p.API.SearchUsers(&model.UserSearch{Term: query, TeamId: req.TeamId, Limit: participantSearchLimit})
 	}
 	if appErr != nil {

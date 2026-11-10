@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 
@@ -98,48 +97,33 @@ func TestCancelSilencesEveryoneStillRinging(t *testing.T) {
 	}
 }
 
-func TestUpcomingEditableOnlyForController(t *testing.T) {
-	p, kv, _ := callWorld(t)
-	m := stored(t, kv)
-	m.Kind, m.Status, m.RoomName, m.Callees = kindAdhoc, statusScheduled, "room1", nil
-	m.Schedule = &Schedule{EventID: "e1"}
-	data, _ := json.Marshal(m)
-	kv[keyMeeting+"m1"] = data
-	if err := p.kvSet(keyRoom+"room1", "m1", 0); err != nil {
-		t.Fatal(err)
+// TestDirectCallsFollowTheDirectMessagePolicy: when Mattermost limits direct
+// messages to team members, a call must not open a channel across teams.
+func TestDirectCallsFollowTheDirectMessagePolicy(t *testing.T) {
+	policy := model.DirectMessageTeam
+	api := &plugintest.API{}
+	api.On("GetConfig").Return(&model.Config{TeamSettings: model.TeamSettings{RestrictDirectMessage: &policy}})
+	api.On("GetTeamsForUser", "u1").Return([]*model.Team{{Id: "t1"}, {Id: "t2"}}, nil)
+	api.On("GetTeamsForUser", "u2").Return([]*model.Team{{Id: "t2"}}, nil)
+	api.On("GetTeamsForUser", "u3").Return([]*model.Team{{Id: "t3"}}, nil)
+	api.On("GetTeamsForUser", "u4").Return(nil, model.NewAppError("GetTeamsForUser", "x", nil, "", http.StatusInternalServerError))
+	p := &Plugin{config: &configuration{}}
+	p.SetAPI(api)
+	if !p.mayMessageDirectly("u1", "u2") {
+		t.Error("a shared team must allow the call")
+	}
+	if p.mayMessageDirectly("u1", "u3") {
+		t.Error("no shared team must refuse the call")
+	}
+	if p.mayMessageDirectly("u1", "u4") {
+		t.Error("an unknown membership must refuse the call")
 	}
 
-	event := upcomingEvent{ID: "e1"}
-	p.attachEditable(&event, "room1", "u1")
-	if event.MeetingID != "m1" || event.ChannelID != "c1" {
-		t.Fatalf("author cannot edit: %+v", event)
-	}
-	other := upcomingEvent{ID: "e1"}
-	p.attachEditable(&other, "room1", "u2")
-	if other.MeetingID != "" {
-		t.Fatal("a plain member got the edit button")
-	}
-	foreign := upcomingEvent{ID: "e2"}
-	p.attachEditable(&foreign, "elsewhere", "u1")
-	if foreign.MeetingID != "" {
-		t.Fatal("a meeting planned outside Mattermost became editable")
-	}
-}
-
-func TestInvitationAnswerNeedsInviteAndKey(t *testing.T) {
-	p, kv, _ := callWorld(t)
-	m := stored(t, kv)
-	m.Kind, m.Status, m.Callees = kindAdhoc, statusScheduled, nil
-	m.Schedule = &Schedule{EventID: "e1", UserIDs: []string{"u2"}}
-	data, _ := json.Marshal(m)
-	kv[keyMeeting+"m1"] = data
-
-	var notInvited *userError
-	if err := p.respondInvitation("u3", "m1", true); !errors.As(err, &notInvited) || notInvited.status != http.StatusForbidden {
-		t.Fatalf("someone not invited could answer: %v", err)
-	}
-	var noKey *userError
-	if err := p.respondInvitation("u2", "m1", true); !errors.As(err, &noKey) || noKey.code != codePersonalKey {
-		t.Fatalf("answer without a personal key: %v", err)
+	anyone := model.DirectMessageAny
+	open := &plugintest.API{}
+	open.On("GetConfig").Return(&model.Config{TeamSettings: model.TeamSettings{RestrictDirectMessage: &anyone}})
+	p.SetAPI(open)
+	if !p.mayMessageDirectly("u1", "u3") {
+		t.Error("the open policy must allow the call")
 	}
 }

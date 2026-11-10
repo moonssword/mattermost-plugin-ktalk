@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"unicode"
@@ -83,10 +84,32 @@ func (c *configuration) validate() error {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
 		return fmt.Errorf("SpaceURL must be an address like https://company.ktalk.ru, got %q", raw)
 	}
+	// The API key travels in a header of every request, so the space must
+	// be reached over TLS. Plain HTTP is for a server on this machine only.
+	if parsed.Scheme == "http" && !isLoopback(parsed.Hostname()) {
+		return fmt.Errorf("SpaceURL must use https, got %q", raw)
+	}
 	if parsed.Path != "" || parsed.RawQuery != "" {
 		return errors.New("SpaceURL must not contain a path or query")
 	}
 	return nil
+}
+
+// defaultRecordingAccess is the access preselected when a recording starts
+// from Mattermost: the administrator's choice, or only those present.
+func (c *configuration) defaultRecordingAccess() string {
+	if c.RecordingLinkAccess == accessDomain || c.RecordingLinkAccess == accessGlobal {
+		return c.RecordingLinkAccess
+	}
+	return accessParticipants
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c *configuration) applyDefaults() {
@@ -95,8 +118,9 @@ func (c *configuration) applyDefaults() {
 	default:
 		c.NamingScheme = schemeWords
 	}
+	// "none" from earlier versions is what "only those present" now means.
 	switch c.RecordingLinkAccess {
-	case "domain", "global", "none":
+	case accessDomain, accessGlobal:
 	default:
 		c.RecordingLinkAccess = ""
 	}

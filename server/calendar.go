@@ -22,12 +22,16 @@ const maxRepeatCount = 100
 
 // scheduleInput is the validated content of the scheduling dialog.
 type scheduleInput struct {
-	Title          string
-	Description    string
-	Start          time.Time
-	DurationMin    int
-	Repeat         string
-	RepeatCount    int
+	Title       string
+	Description string
+	Start       time.Time
+	DurationMin int
+	Repeat      string
+	RepeatCount int
+	Rule        *RepeatRule
+	// Location is the organizer's time zone, which the weekday of the start
+	// and the last day of a series are read in.
+	Location       *time.Location
 	UserIDs        []string
 	ExternalEmails []string
 	Pin            string
@@ -38,8 +42,9 @@ type scheduleInput struct {
 }
 
 // parseScheduleSubmission validates dialog fields, returning per-field errors.
-func parseScheduleSubmission(sub map[string]any, now time.Time) (scheduleInput, map[string]string) {
-	in := scheduleInput{}
+// Dates are read in loc, the organizer's time zone.
+func parseScheduleSubmission(sub map[string]any, now time.Time, loc *time.Location) (scheduleInput, map[string]string) {
+	in := scheduleInput{Location: loc}
 	errs := map[string]string{}
 
 	in.Title = clip(stringField(sub, "title"), maxTitleLength)
@@ -63,18 +68,14 @@ func parseScheduleSubmission(sub map[string]any, now time.Time) (scheduleInput, 
 		errs["duration"] = "Выберите длительность."
 	}
 
-	in.Repeat = stringField(sub, "repeat")
-	switch in.Repeat {
-	case "", "none":
-		in.Repeat = ""
-	case "daily", "weekly", "monthly":
-		count, ok := intField(sub, "repeat_count")
-		in.RepeatCount = count
-		if !ok || count < 2 || count > maxRepeatCount {
-			errs["repeat_count"] = fmt.Sprintf("Укажите число встреч от 2 до %d.", maxRepeatCount)
+	if !in.Start.IsZero() {
+		rule, repeatErrs := parseRepeat(sub, in.Start.In(loc))
+		for field, message := range repeatErrs {
+			errs[field] = message
 		}
-	default:
-		errs["repeat"] = "Неизвестный вариант."
+		if rule != nil {
+			in.Rule, in.Repeat, in.RepeatCount = rule, rule.Freq, rule.Count
+		}
 	}
 
 	in.UserIDs = listField(sub, "participants")
@@ -147,23 +148,6 @@ func listField(sub map[string]any, key string) []string {
 		return strings.Split(value, ",")
 	}
 	return nil
-}
-
-// buildRecurrence converts the dialog choice to the API pattern.
-func buildRecurrence(repeat string, count int, start time.Time) *talk.Recurrence {
-	if repeat == "" {
-		return nil
-	}
-	one := 1
-	rec := &talk.Recurrence{Type: repeat, StartDate: &start, NumberOfEvents: &count, Interval: &one}
-	switch repeat {
-	case "weekly":
-		rec.DaysOfTheWeek = []string{strings.ToLower(start.Weekday().String())}
-	case "monthly":
-		day := start.Day()
-		rec.DayOfMonth = &day
-	}
-	return rec
 }
 
 // calendarClient picks the key to call the calendar with. A personal key acts
@@ -242,9 +226,13 @@ func eventFromInput(in scheduleInput, roomName, timezone string, keys, emails []
 		RequiredExternalEmails: append(emails, in.ExternalEmails...),
 		ControlledExternally:   &external,
 	}
-	if in.Repeat != "" {
+	if in.Rule != nil {
+		loc := in.Location
+		if loc == nil {
+			loc = time.UTC
+		}
 		event.IsRecurring = true
-		event.Recurrence = buildRecurrence(in.Repeat, in.RepeatCount, in.Start)
+		event.Recurrence = in.Rule.recurrence(in.Start, loc)
 	}
 	return event
 }
@@ -284,7 +272,7 @@ func (p *Plugin) scheduleMeeting(user *model.User, channel *model.Channel, rootI
 		CreatedAt: now, Lobby: in.Lobby, Pin: in.Pin, Moderators: []string{organizer.Key},
 		Schedule: &Schedule{
 			Email: email, UsePersonalKey: personal, Start: in.Start, End: end, Timezone: timezone,
-			Description: in.Description, Repeat: in.Repeat, RepeatCount: in.RepeatCount, Recurring: in.Repeat != "",
+			Description: in.Description, Repeat: in.Repeat, RepeatCount: in.RepeatCount, Recurring: in.Repeat != "", Rule: in.Rule,
 			UserIDs: in.UserIDs, UserKeys: keys, ExternalEmails: in.ExternalEmails, AllowGuests: in.Guests,
 			AutoRecord: in.AutoRecord, EnableSIP: in.SIP,
 		},
@@ -310,6 +298,7 @@ func (p *Plugin) scheduleMeeting(user *model.User, channel *model.Channel, rootI
 		m.URL = item.OnlineMeetingURL
 	}
 	m.Schedule.Attendees = attendeesFrom(item)
+	m.Schedule.OrganizerKey = organizerKey(item)
 	m.Schedule.AttendeesAt = now
 	m.Schedule.InviteeKeys = p.inviteeKeys(in.UserIDs)
 	p.absorbRoom(roomClient, m)
@@ -391,10 +380,11 @@ func (p *Plugin) rescheduleMeeting(user *model.User, m *Meeting, in scheduleInpu
 		fresh.GuestsUntil = guests
 		sc := fresh.Schedule
 		sc.Start, sc.End, sc.Timezone, sc.Description = in.Start, event.End, timezone, in.Description
-		sc.Repeat, sc.RepeatCount, sc.Recurring = in.Repeat, in.RepeatCount, in.Repeat != ""
+		sc.Repeat, sc.RepeatCount, sc.Recurring, sc.Rule = in.Repeat, in.RepeatCount, in.Repeat != "", in.Rule
 		sc.UserIDs, sc.UserKeys, sc.ExternalEmails = in.UserIDs, keys, in.ExternalEmails
 		sc.AllowGuests, sc.AutoRecord, sc.EnableSIP, sc.Reminded = in.Guests, in.AutoRecord, in.SIP, false
 		sc.Attendees = attendeesFrom(item)
+		sc.OrganizerKey = organizerKey(item)
 		sc.AttendeesAt = time.Now().UTC()
 		sc.InviteeKeys = invitees
 	})
@@ -402,7 +392,7 @@ func (p *Plugin) rescheduleMeeting(user *model.User, m *Meeting, in scheduleInpu
 
 // cancelSchedule cancels the calendar event and closes the card.
 func (p *Plugin) cancelSchedule(userID, meetingID string) error {
-	m, err := p.controlledMeeting(userID, meetingID)
+	m, err := p.controlledMeeting(userID, meetingID, rightSchedule)
 	if err != nil {
 		return err
 	}
@@ -519,6 +509,9 @@ func (p *Plugin) syncSchedule(_ *talk.Client, m *Meeting, now time.Time) {
 			}
 			fresh.Schedule.InviteeKeys = invitees
 			fresh.Schedule.Attendees = attendeesFrom(item)
+			if key := organizerKey(item); key != "" {
+				fresh.Schedule.OrganizerKey = key
+			}
 			fresh.Schedule.AttendeesAt = now
 			if item.IsCancelled {
 				fresh.Status = statusCancelled
@@ -636,8 +629,10 @@ type upcomingEvent struct {
 	Online    int       `json:"online"`
 	External  string    `json:"external,omitempty"`
 	Recurring bool      `json:"recurring,omitempty"`
-	// Repeat is daily, weekly or monthly when known, for a recurring event.
-	Repeat string `json:"repeat,omitempty"`
+	// Repeat is daily, weekly or monthly when known, for a recurring event,
+	// and RepeatText says it in full, as the meeting card does.
+	Repeat     string `json:"repeat,omitempty"`
+	RepeatText string `json:"repeat_text,omitempty"`
 	// Set when the user may change the meeting from Mattermost.
 	MeetingID string `json:"meeting_id,omitempty"`
 	ChannelID string `json:"channel_id,omitempty"`
@@ -651,9 +646,11 @@ func (p *Plugin) upcomingForUser(user *model.User) ([]upcomingEvent, error) {
 		return nil, problem
 	}
 	email := p.talkEmail(user)
-	if _, ok := p.talkUser(user); !ok {
+	identity, ok := p.talkUser(user)
+	if !ok {
 		return nil, notInTalkError()
 	}
+	ownKey := identity.Key
 	client, _, err := p.calendarClient(user.Id)
 	if err != nil {
 		return nil, err
@@ -689,10 +686,10 @@ func (p *Plugin) upcomingForUser(user *model.User) ([]upcomingEvent, error) {
 		if !isWebURL(event.URL) {
 			event.URL = ""
 		}
-		p.attachEditable(&event, item.RoomName, user.Id)
+		p.attachEditable(&event, item, ownKey)
 		if event.Recurring {
 			event.series = seriesKey(item)
-			event.Repeat = p.plannedRepeat(item.RoomName)
+			event.Repeat, event.RepeatText = p.plannedRepeat(item.RoomName)
 		}
 		events = append(events, event)
 	}
@@ -713,16 +710,17 @@ func seriesKey(item *talk.CalendarItem) string {
 	return "subject:" + item.Subject + "|" + link
 }
 
-// plannedRepeat returns how often a meeting planned from Mattermost repeats.
-func (p *Plugin) plannedRepeat(roomName string) string {
+// plannedRepeat returns how a meeting planned from Mattermost repeats: its
+// period and the full description.
+func (p *Plugin) plannedRepeat(roomName string) (string, string) {
 	if roomName == "" {
-		return ""
+		return "", ""
 	}
 	m, err := p.getMeetingByIndex(keyRoom + roomName)
 	if err != nil || m.Schedule == nil {
-		return ""
+		return "", ""
 	}
-	return m.Schedule.Repeat
+	return m.Schedule.Repeat, m.Schedule.repeatText()
 }
 
 // collapseSeries keeps the nearest occurrence of each recurring meeting, so a
@@ -764,14 +762,14 @@ func collapseSeries(events []upcomingEvent) []upcomingEvent {
 }
 
 // attachEditable links a calendar event to the scheduled meeting this plugin
-// created for it, when the user may change that meeting. Meetings planned
+// created for it, when the user organizes it in Talk. Meetings planned
 // elsewhere in Talk or in another calendar stay read-only.
-func (p *Plugin) attachEditable(event *upcomingEvent, roomName, userID string) {
-	if roomName == "" {
+func (p *Plugin) attachEditable(event *upcomingEvent, item *talk.CalendarItem, ownKey string) {
+	if item.RoomName == "" || ownKey == "" || organizerKey(item) != ownKey {
 		return
 	}
-	m, err := p.getMeetingByIndex(keyRoom + roomName)
-	if err != nil || m.Schedule == nil || m.Status != statusScheduled || !p.canControl(userID, m) {
+	m, err := p.getMeetingByIndex(keyRoom + item.RoomName)
+	if err != nil || m.Schedule == nil || m.Status != statusScheduled {
 		return
 	}
 	event.MeetingID = m.ID
@@ -788,21 +786,31 @@ func (p *Plugin) respondInvitation(userID, meetingID string, accept bool) error 
 	if err != nil {
 		return err
 	}
-	if !p.canView(userID, m) {
-		return errForbidden
-	}
 	if m.Schedule == nil || m.Status != statusScheduled || m.Schedule.EventID == "" {
 		return newUserError(http.StatusBadRequest, "Ответить можно только на запланированную встречу.")
-	}
-	if !slices.Contains(m.Schedule.UserIDs, userID) {
-		return newUserError(http.StatusForbidden, "Вы не приглашены на эту встречу.")
 	}
 	client := p.personalClient(userID)
 	if client == nil {
 		return newCodedError(http.StatusConflict, codePersonalKey, "Чтобы отвечать на приглашения в Mattermost, подключите личный ключ Толка в «Настройки → Контур.Толк».")
 	}
+	// Talk says who is invited: an attendee of the event, other than its
+	// organizer, who has nothing to answer.
+	key := p.talkKeyOf(userID)
 	ctx, cancel := apiContext()
 	defer cancel()
+	organizer, item, err := p.organizerOf(ctx, m)
+	if err != nil {
+		return p.describeAPIError("read invitation", err)
+	}
+	invited := false
+	for _, attendee := range attendeesFrom(item) {
+		if key != "" && attendee.Key == key && key != organizer {
+			invited = true
+		}
+	}
+	if !invited {
+		return newUserError(http.StatusForbidden, "Вы не приглашены на эту встречу.")
+	}
 	if err := client.RespondToEvent(ctx, m.Schedule.EventID, accept); err != nil {
 		if talk.IsStatus(err, http.StatusUnauthorized) {
 			return p.calendarError(client, userID, "respond to invitation", err)
@@ -812,7 +820,7 @@ func (p *Plugin) respondInvitation(userID, meetingID string, accept bool) error 
 	}
 	p.audit("respondInvitation", userID, m.ID)
 	if accept && m.Schedule.Recurring {
-		go p.acceptOccurrences(m, userID, client)
+		go p.acceptOccurrences(m, key, client)
 	}
 	// Show the answer now instead of at the next calendar refresh.
 	if updated, _, err := p.updateMeeting(m.ID, func(fresh *Meeting) bool {
@@ -834,8 +842,7 @@ const occurrenceHorizon = 8 * 7 * 24 * time.Hour
 // copies a declined series onto every occurrence and hides them from the
 // attendee's calendar, but an accepted series leaves occurrences as they were,
 // so a change of mind would keep the meetings declined and hidden.
-func (p *Plugin) acceptOccurrences(m *Meeting, userID string, personal *talk.Client) {
-	key := m.Schedule.InviteeKeys[userID]
+func (p *Plugin) acceptOccurrences(m *Meeting, key string, personal *talk.Client) {
 	organizer, err := p.calendarClientFor(m)
 	if key == "" || err != nil {
 		return

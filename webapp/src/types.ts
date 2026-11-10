@@ -44,6 +44,7 @@ export interface MeetingView {
         end: string;
         description?: string;
         repeat?: string;
+        repeat_text?: string;
         recurring?: boolean;
         auto_record?: boolean;
         attendees?: Attendee[] | null;
@@ -69,6 +70,7 @@ export interface PluginConfig {
     personal_keys: boolean;
     personal_key: boolean;
     join_opens_min: number;
+    recording_access?: string;
 }
 
 export interface UpcomingEvent {
@@ -81,6 +83,7 @@ export interface UpcomingEvent {
     external?: string;
     recurring?: boolean;
     repeat?: string;
+    repeat_text?: string;
     meeting_id?: string;
     channel_id?: string;
 }

@@ -50,6 +50,9 @@ func TestConfigurationValidation(t *testing.T) {
 		"https://x.ktalk.ru/some/path": false,
 		"x.ktalk.ru":                   false,
 		"ftp://x.ktalk.ru":             false,
+		"http://x.ktalk.ru":            false, // the key would travel in clear
+		"http://localhost:8080":        true,
+		"http://127.0.0.1":             true,
 	}
 	for raw, ok := range cases {
 		err := (&configuration{SpaceURL: raw}).validate()
@@ -235,6 +238,9 @@ func TestViewHidesServerFields(t *testing.T) {
 }
 
 func TestSafeInlineNeutralizesMentions(t *testing.T) {
+	if got := safeInline("x](https://evil.example) [y"); got != `x\](https://evil.example) \[y` {
+		t.Errorf("link marks survive: %q", got)
+	}
 	if strings.Contains(safeInline("hi @channel"), "@channel") {
 		t.Fatal("mention survives")
 	}
@@ -274,32 +280,22 @@ func TestTimezoneLabel(t *testing.T) {
 
 func TestScheduleSubmission(t *testing.T) {
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
-	good := map[string]any{"title": " Планёрка ", "start": "2026-11-08T09:00:00Z", "duration": "30", "repeat": "weekly", "repeat_count": "4",
+	good := map[string]any{"title": " Планёрка ", "start": "2026-11-08T09:00:00Z", "duration": "30", "repeat": "weekly", "repeat_end": "count", "repeat_count": "4",
 		"participants": []any{"u1", "u2"}, "external": "a@b.ru, c@d.ru", "pin": "1234", "lobby": true, "guests": "true"}
-	in, errs := parseScheduleSubmission(good, now)
+	in, errs := parseScheduleSubmission(good, now, time.UTC)
 	if len(errs) != 0 {
 		t.Fatal(errs)
 	}
 	if in.Title != "Планёрка" || in.DurationMin != 30 || in.RepeatCount != 4 || len(in.UserIDs) != 2 || len(in.ExternalEmails) != 2 || !in.Lobby || !in.Guests {
 		t.Fatalf("%+v", in)
 	}
-	bad := map[string]any{"title": "", "start": "2020-01-01T00:00:00Z", "duration": "x", "repeat": "daily", "repeat_count": "1", "external": "not-an-email", "pin": "12"}
-	_, errs = parseScheduleSubmission(bad, now)
-	for _, field := range []string{"title", "start", "duration", "repeat_count", "external", "pin"} {
+	bad := map[string]any{"title": "", "start": "2020-01-01T00:00:00Z", "duration": "x", "repeat": "daily", "repeat_end": "count", "repeat_count": "1", "external": "not-an-email", "pin": "12"}
+	_, errs = parseScheduleSubmission(bad, now, time.UTC)
+	// The repeat is checked against a valid start only; see repeat_test.go.
+	for _, field := range []string{"title", "start", "duration", "external", "pin"} {
 		if errs[field] == "" {
 			t.Errorf("no error for %s", field)
 		}
-	}
-}
-
-func TestRecurrenceSendsOnlyCount(t *testing.T) {
-	start := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC) // A Monday.
-	rec := buildRecurrence("weekly", 4, start)
-	if rec.EndDate != nil || *rec.NumberOfEvents != 4 || rec.DaysOfTheWeek[0] != "monday" {
-		t.Fatalf("%+v", rec)
-	}
-	if buildRecurrence("", 0, start) != nil {
-		t.Fatal("no repeat must mean no recurrence")
 	}
 }
 
@@ -453,7 +449,13 @@ func TestDialogsFitServerLimits(t *testing.T) {
 	const limit = 24
 	start := time.Date(2026, 11, 9, 9, 0, 0, 0, time.UTC)
 	edit := &Meeting{ID: "1", Title: "x", Schedule: &Schedule{Start: start, End: start.Add(time.Hour)}}
-	for _, dialog := range []model.Dialog{scheduleDialog(nil, "", "", "UTC"), scheduleDialog(edit, "Иван Петров (@ivan.petrov)", "", "UTC")} {
+	// The repeat fields of "Другое…" appear only once chosen, so they are
+	// laid out too, with both ways to end a series.
+	custom := func(end string) model.Dialog {
+		values := map[string]string{"start": start.Format(time.RFC3339), "duration": "60", "repeat": repeatCustom, "repeat_end": end}
+		return scheduleForm(values, "new:", time.UTC, start)
+	}
+	for _, dialog := range []model.Dialog{scheduleDialog(nil, "", "", "UTC"), scheduleDialog(edit, "Иван Петров (@ivan.petrov)", "", "UTC"), custom(repeatEndDate), custom(repeatEndCount)} {
 		if len(dialog.Title) > limit {
 			t.Errorf("title %q is %d bytes", dialog.Title, len(dialog.Title))
 		}
@@ -611,8 +613,8 @@ func TestIntFieldAcceptsNumbersAndText(t *testing.T) {
 }
 
 func TestScheduleRepeatCountFromMattermost11(t *testing.T) {
-	sub := map[string]any{"title": "Т", "start": "2030-01-01T10:00:00Z", "duration": "60", "repeat": "daily", "repeat_count": float64(2)}
-	_, errs := parseScheduleSubmission(sub, time.Date(2029, 12, 1, 0, 0, 0, 0, time.UTC))
+	sub := map[string]any{"title": "Т", "start": "2030-01-01T10:00:00Z", "duration": "60", "repeat": "daily", "repeat_end": "count", "repeat_count": float64(2)}
+	_, errs := parseScheduleSubmission(sub, time.Date(2029, 12, 1, 0, 0, 0, 0, time.UTC), time.UTC)
 	if msg, bad := errs["repeat_count"]; bad {
 		t.Fatalf("a numeric 2 was rejected: %s", msg)
 	}
@@ -632,11 +634,18 @@ func TestPersonalKeyMessages(t *testing.T) {
 	}
 }
 
-func TestSameNameIgnoresOrder(t *testing.T) {
+func TestSameNameIgnoresOrderButNotWords(t *testing.T) {
 	cases := []struct {
 		a, b string
 		want bool
-	}{{"Петров Иван", "Иван Петров", true}, {"Петров Иван ", "иван петров", true}, {"Анна Смирнова", "Борис Петров", false}, {"", "Кто угодно", true}}
+	}{
+		{"Петров Иван", "Иван Петров", true},
+		{"Петров Иван ", "иван петров", true},
+		{"Анна Смирнова", "Борис Петров", false},
+		{"Иван Петров", "Иван", false}, // a shorter name is not the same person
+		{"Иван Петров", "Иван Петров Сидоров", false},
+		{"", "Кто угодно", false}, // nothing to match means no match
+	}
 	for _, c := range cases {
 		if got := sameName(c.a, c.b); got != c.want {
 			t.Errorf("%q vs %q: %v", c.a, c.b, got)
