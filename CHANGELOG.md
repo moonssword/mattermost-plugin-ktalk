@@ -4,25 +4,23 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
 ### Changed
 
 - **Users act in Talk with their own personal keys.** Creating rooms, the personal room, the PIN, guests, the waiting room, *End for everyone*, planning, invitations, the *Recordings* tab and the summary texts all go through the user's personal key, so Talk applies each person's rights. Room moderators are now recognised by Talk's own answer to the user's key. The space key stays for the plugin as a whole, for ringing in the Talk app and for starting a recording, which Talk refuses to personal keys and which the plugin starts only for a room moderator.
 - Without a personal key a user can still start a meeting or a call, created with the space key, join meetings and answer calls; everything else needs a key. The *Allow personal API keys* and *Calendar with personal keys only* settings are gone, and planning always needs a personal key.
 - Any action that needs a key opens the key form in the sidebar and then offers to continue. A card tells the person who started a meeting without a key that running it needs one, and an invitation can be answered once a key is connected.
 - The space key needs only read access to `calendar`.
+- A link nobody has opened for two hours leaves the *Now* tab. The room still works and is still watched, so the meeting comes back if someone joins.
+- The *Recordings* tab reads Talk's own list of the user's recordings.
+- Empty *Now*, *Upcoming* and *Recordings* lists show a mark above the text, as the summary and transcript already did.
 
 ### Added
 
 - Until a personal key is connected, the sidebar asks for it at once with the key form open. *Later* folds the form into one line about what a key opens, which can be hidden too.
 - The *Connection* block in the System Console shows how many users of the plugin (those who opened the sidebar, started a meeting or connected a key) have connected a personal key.
-
 - Plugin settings inside the sidebar, behind a sliders button: the personal key, then *Appearance*, *Meetings* and *Calls and notices* with lists for choices and switches for yes-or-no settings, and the plugin version at the bottom. They are the same preferences as in **Settings → Контур.Толк** and are saved at once.
-
-### Changed
-
-- A link nobody has opened for two hours leaves the *Now* tab. The room still works and is still watched, so the meeting comes back if someone joins.
-- The *Recordings* tab reads Talk's own list of the user's recordings.
-- Empty *Now*, *Upcoming* and *Recordings* lists show a mark above the text, as the summary and transcript already did.
 
 ### Fixed
 
@@ -166,7 +164,8 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/moonssword/mattermost-plugin-ktalk/releases/tag/v0.5.0
