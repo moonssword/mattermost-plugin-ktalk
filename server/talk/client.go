@@ -382,7 +382,11 @@ type Room struct {
 	OnlineUsers                   []OnlineUser `json:"onlineUsers,omitempty"`
 	SIPSettings                   *SIPSettings `json:"sipSettings,omitempty"`
 	EnableAutoRecording           *bool        `json:"enableAutoRecording,omitempty"`
-	Moderators                    []User       `json:"moderators,omitempty"`
+	// IsModerator is Talk's answer for the caller. Read with a personal key,
+	// it tells whether that user runs the room, a room without moderators
+	// included, where everybody does.
+	IsModerator bool   `json:"isModerator"`
+	Moderators  []User `json:"moderators,omitempty"`
 }
 
 // GetRoom returns a room by key.
@@ -710,6 +714,27 @@ func (c *Client) ListRecordings(ctx context.Context, f RecordingFilter) (*Record
 	return &out, nil
 }
 
+// ListUserRecordings returns the recordings Talk shows the owner of a
+// personal key, newest first, as its own recordings page does.
+func (c *Client) ListUserRecordings(ctx context.Context, query string, skip, top int) ([]Recording, error) {
+	values := url.Values{"skip": {fmt.Sprint(skip)}, "top": {fmt.Sprint(top)}}
+	if query != "" {
+		values.Set("query", query)
+	}
+	var out struct {
+		Recordings []Recording `json:"recordings"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/Recordings", values, nil, &out); err != nil {
+		return nil, err
+	}
+	for i := range out.Recordings {
+		if out.Recordings[i].Key == "" {
+			out.Recordings[i].Key = out.Recordings[i].ID
+		}
+	}
+	return out.Recordings, nil
+}
+
 // GetRecording returns one recording.
 func (c *Client) GetRecording(ctx context.Context, key string) (*Recording, error) {
 	var out Recording
@@ -812,11 +837,96 @@ const (
 	SpeechInProgress = "inProgress"
 )
 
-// SummaryChunk is one part of a summary.
+// SummaryChunk is one part of a summary. Some kinds carry JSON in Text: a
+// summary with highlights holds a headline and a summary, and protocol parts
+// hold a title with content, topics or tasks. Talk's own pages read them so.
 type SummaryChunk struct {
-	Type      string `json:"type"`
-	Timestamp int    `json:"timestamp"`
-	Text      string `json:"text"`
+	Type         string `json:"type"`
+	Timestamp    int    `json:"timestamp"`
+	Text         string `json:"text"`
+	HiddenStatus *struct {
+		IsHidden bool `json:"isHidden"`
+	} `json:"hiddenStatus,omitempty"`
+}
+
+// chunkData is the JSON some summary parts carry.
+type chunkData struct {
+	Headline string `json:"headline"`
+	Summary  string `json:"summary"`
+	Title    string `json:"title"`
+	Content  string `json:"content"`
+	Topics   []struct {
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	} `json:"topics"`
+	Tasks []struct {
+		Task        string `json:"task"`
+		Responsible string `json:"responsible"`
+		Deadline    string `json:"deadline"`
+	} `json:"tasks"`
+}
+
+// Markdown renders a part as Markdown. Plain text stays as it is, and JSON
+// that does not parse is shown as text rather than lost.
+func (c *SummaryChunk) Markdown() string {
+	text := strings.TrimSpace(c.Text)
+	if !strings.HasPrefix(text, "{") {
+		return text
+	}
+	var data chunkData
+	if json.Unmarshal([]byte(text), &data) != nil {
+		return text
+	}
+	var parts []string
+	if title := strings.TrimSpace(firstOf(data.Headline, data.Title)); title != "" {
+		parts = append(parts, "**"+title+"**")
+	}
+	if body := strings.TrimSpace(firstOf(data.Summary, data.Content)); body != "" {
+		parts = append(parts, body)
+	}
+	if len(data.Topics) > 0 {
+		lines := make([]string, 0, len(data.Topics))
+		for _, topic := range data.Topics {
+			line := strings.TrimSpace(topic.Content)
+			if title := strings.TrimSpace(topic.Title); title != "" {
+				line = strings.TrimSpace("**" + title + "** · " + line)
+			}
+			if line != "" {
+				lines = append(lines, "- "+line)
+			}
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(data.Tasks) > 0 {
+		lines := make([]string, 0, len(data.Tasks))
+		for _, task := range data.Tasks {
+			if strings.TrimSpace(task.Task) == "" {
+				continue
+			}
+			line := "- " + strings.TrimSpace(task.Task)
+			if who := strings.TrimSpace(task.Responsible); who != "" {
+				line += "\n  - Ответственный: " + who
+			}
+			if when := strings.TrimSpace(task.Deadline); when != "" {
+				line += "\n  - Срок: " + when
+			}
+			lines = append(lines, line)
+		}
+		parts = append(parts, strings.Join(lines, "\n"))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func firstOf(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // Summary is a short summary or a protocol.
@@ -832,8 +942,12 @@ func (s *Summary) Text() string {
 		return ""
 	}
 	parts := make([]string, 0, len(s.Chunks))
-	for _, chunk := range s.Chunks {
-		if text := strings.TrimSpace(chunk.Text); text != "" {
+	for i := range s.Chunks {
+		chunk := &s.Chunks[i]
+		if chunk.HiddenStatus != nil && chunk.HiddenStatus.IsHidden {
+			continue
+		}
+		if text := chunk.Markdown(); text != "" {
 			parts = append(parts, text)
 		}
 	}

@@ -163,6 +163,7 @@ func (p *Plugin) startMeeting(userID string, req createRequest) (*Meeting, error
 	}
 	p.metrics.meetingsCreated.Add(1)
 	p.audit("startMeeting", user.Id, meeting.ID)
+	p.markSeen(user.Id)
 
 	if kind == kindCall {
 		p.ringChannel(meeting.ID, user, members)
@@ -250,10 +251,13 @@ func (p *Plugin) channelUsers(channelID string) []*model.User {
 // provisionRoom applies the channel policy to the Talk room. Without an API
 // key the meeting stays a plain link.
 func (p *Plugin) provisionRoom(m *Meeting, channel *model.Channel, user *model.User, members []*model.User, now time.Time) error {
-	client := p.client()
-	if client == nil {
+	if p.client() == nil {
 		m.LinkOnly = true
 		return nil
+	}
+	client, err := p.roomMaker(user.Id)
+	if err != nil {
+		return err
 	}
 	var memberCount int64
 	if stats, appErr := p.API.GetChannelStats(channel.Id); appErr == nil {
@@ -291,7 +295,7 @@ func (p *Plugin) provisionRoom(m *Meeting, channel *model.Channel, user *model.U
 	defer cancel()
 	room, err := client.PutRoom(ctx, m.RoomName, roomParamsFor(m))
 	if err != nil {
-		return p.describeAPIError("put room", err)
+		return p.personalAPIError(client, user.Id, "put room", err)
 	}
 	if room.SIPSettings != nil && (room.SIPSettings.SIPNumber != "" || len(room.SIPSettings.PhoneNumbers) > 0) {
 		m.SIP = room.SIPSettings
@@ -669,7 +673,12 @@ func (p *Plugin) personalRoom(user *model.User) (string, error) {
 		return cfg.roomURL(roomName), nil
 	}
 	roomName = personalRoomName(cfg.RoomPrefix, user.Id)
-	if client := p.client(); client != nil {
+	if p.client() != nil {
+		// The room is the user's own, so the user makes it in Talk.
+		client, err := p.userClient(user.Id)
+		if err != nil {
+			return "", err
+		}
 		params := talk.RoomParams{Title: "Комната " + user.GetDisplayName(model.ShowFullName), EnableLobby: true}
 		if identity, ok := p.talkUser(user); ok {
 			params.ModeratorKeys = []string{identity.Key}
@@ -677,7 +686,7 @@ func (p *Plugin) personalRoom(user *model.User) (string, error) {
 		ctx, cancel := apiContext()
 		defer cancel()
 		if _, err := client.PutRoom(ctx, roomName, params); err != nil {
-			return "", p.describeAPIError("personal room", err)
+			return "", p.personalAPIError(client, user.Id, "personal room", err)
 		}
 	}
 	if err := p.kvSet(keyPersonal+user.Id, roomName, 0); err != nil {
@@ -698,7 +707,7 @@ func (p *Plugin) canView(userID string, m *Meeting) bool {
 func (p *Plugin) requireClient() (*talk.Client, error) {
 	client := p.client()
 	if client == nil {
-		return nil, newUserError(http.StatusConflict, "Для этого действия нужен API-ключ Контур.Толка.")
+		return nil, newUserError(http.StatusConflict, "Для этого действия администратор должен указать API-ключ пространства в настройках плагина.")
 	}
 	return client, nil
 }
@@ -727,18 +736,14 @@ func (p *Plugin) latestChannelMeeting(channelID string) (*Meeting, error) {
 
 // endMeeting ends the conference for everybody.
 func (p *Plugin) endMeeting(userID, meetingID string) error {
-	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
-	if err != nil {
-		return err
-	}
-	client, err := p.requireClient()
+	m, client, err := p.roomAction(userID, meetingID)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
 	if err := client.EndConference(ctx, m.RoomName); err != nil && !talk.IsNotFound(err) {
-		return p.describeAPIError("end conference", err)
+		return p.personalAPIError(client, userID, "end conference", err)
 	}
 	p.audit("endMeeting", userID, m.ID)
 	p.syncMeetingByID(m.ID)
@@ -798,6 +803,8 @@ func (p *Plugin) startRecording(userID, meetingID, access string) error {
 	if !validAccess(access) {
 		return newUserError(http.StatusBadRequest, "Неизвестный вариант доступа к записи.")
 	}
+	// Talk takes no personal key for recording, so the organization starts
+	// it, and only for a moderator, as Talk tells through the user's own key.
 	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
 	if err != nil {
 		return err
@@ -898,14 +905,14 @@ func (p *Plugin) setPin(userID, meetingID, pin string) error {
 	if pin != "" && !validPin(pin) {
 		return newUserError(http.StatusBadRequest, "ПИН-код: от 4 до 6 цифр.")
 	}
-	client, err := p.requireClient()
+	client, err := p.userClient(userID)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
 	if err := client.SetRoomPin(ctx, m.RoomName, pin); err != nil {
-		return p.describeAPIError("set pin", err)
+		return p.personalAPIError(client, userID, "set pin", err)
 	}
 	return p.saveAndRefresh(m.ID, func(m *Meeting) { m.Pin = pin })
 }
@@ -924,11 +931,7 @@ func validPin(pin string) bool {
 
 // setGuests opens the room to guests for some hours; zero closes it.
 func (p *Plugin) setGuests(userID, meetingID string, hours int) error {
-	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
-	if err != nil {
-		return err
-	}
-	client, err := p.requireClient()
+	m, client, err := p.roomAction(userID, meetingID)
 	if err != nil {
 		return err
 	}
@@ -940,18 +943,14 @@ func (p *Plugin) setGuests(userID, meetingID string, hours int) error {
 	ctx, cancel := apiContext()
 	defer cancel()
 	if err := client.SetAnonymousAccess(ctx, m.RoomName, until); err != nil {
-		return p.describeAPIError("set guests", err)
+		return p.personalAPIError(client, userID, "set guests", err)
 	}
 	return p.saveAndRefresh(m.ID, func(m *Meeting) { m.GuestsUntil = until })
 }
 
 // setLobby turns the waiting room on or off.
 func (p *Plugin) setLobby(userID, meetingID string, enabled bool) error {
-	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
-	if err != nil {
-		return err
-	}
-	client, err := p.requireClient()
+	m, client, err := p.roomAction(userID, meetingID)
 	if err != nil {
 		return err
 	}
@@ -959,7 +958,7 @@ func (p *Plugin) setLobby(userID, meetingID string, enabled bool) error {
 	ctx, cancel := apiContext()
 	defer cancel()
 	if _, err := client.PutRoom(ctx, m.RoomName, roomParamsFor(m)); err != nil {
-		return p.describeAPIError("set lobby", err)
+		return p.personalAPIError(client, userID, "set lobby", err)
 	}
 	return p.saveAndRefresh(m.ID, func(m *Meeting) { m.Lobby = enabled })
 }
@@ -1012,4 +1011,29 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+// roomMaker is the key a new meeting room is made with. With a personal key
+// the user makes it and Talk sees them as its owner. A user without one may
+// still start a quick meeting or a call, the least the plugin is for; the
+// space key then makes the room, with the user as its moderator.
+func (p *Plugin) roomMaker(userID string) (*talk.Client, error) {
+	if personal := p.personalClient(userID); personal != nil {
+		return personal, nil
+	}
+	return p.requireClient()
+}
+
+// roomAction loads a meeting whose room the user runs, with the user's own
+// client to change it.
+func (p *Plugin) roomAction(userID, meetingID string) (*Meeting, *talk.Client, error) {
+	m, err := p.controlledMeeting(userID, meetingID, rightRoom)
+	if err != nil {
+		return nil, nil, err
+	}
+	client, err := p.userClient(userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, client, nil
 }

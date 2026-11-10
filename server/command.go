@@ -23,7 +23,7 @@ const helpText = `**Контур.Толк**
 * ` + "`/talk lobby <on|off>`" + ` включить или выключить зал ожидания.
 * ` + "`/talk record`" + ` начать запись.
 * ` + "`/talk end`" + ` завершить встречу для всех.
-* ` + "`/talk connect`" + ` подключить личный API-ключ Толка, ` + "`/talk disconnect`" + ` отключить его.
+* ` + "`/talk connect`" + ` подключить личный ключ Толка, ` + "`/talk disconnect`" + ` отключить его.
 * ` + "`/talk settings`" + ` личные настройки.
 * ` + "`/talk status`" + ` состояние подключения.
 
@@ -46,8 +46,8 @@ func talkCommand() *model.Command {
 	lobby.AddStaticListArgument("Состояние", true, []model.AutocompleteListItem{{Item: "on", HelpText: "Включить"}, {Item: "off", HelpText: "Выключить"}})
 	add("record", "", "Начать запись")
 	add("end", "", "Завершить встречу для всех")
-	add("connect", "", "Подключить личный API-ключ")
-	add("disconnect", "", "Отключить личный API-ключ")
+	add("connect", "", "Подключить личный ключ Толка")
+	add("disconnect", "", "Отключить личный ключ Толка")
 	add("settings", "", "Личные настройки")
 	add("status", "", "Состояние подключения")
 	add("help", "", "Справка")
@@ -117,7 +117,7 @@ func (p *Plugin) runCommand(sub, rest string, args *model.CommandArgs) (*model.C
 		if err := p.disconnectPersonalKey(args.UserId); err != nil {
 			return nil, err
 		}
-		return ephemeral("Личный ключ Толка отключён. Календарь работает через ключ пространства."), nil
+		return ephemeral("Личный ключ Толка отключён. Планирование, управление встречами и записи станут доступны снова, когда вы подключите ключ."), nil
 	case "settings":
 		return p.commandSettings(rest, args)
 	case "status":
@@ -335,16 +335,13 @@ func (p *Plugin) openDialog(triggerID, name string, dialog model.Dialog) (*model
 }
 
 func (p *Plugin) commandConnect(args *model.CommandArgs) (*model.CommandResponse, error) {
-	if !p.getConfig().AllowPersonalKeys {
-		return ephemeral("Личные API-ключи отключены администратором."), nil
-	}
 	if p.client() == nil {
 		return ephemeral("Сначала администратор должен указать API-ключ пространства."), nil
 	}
 	dialog := model.Dialog{
 		CallbackId:       "connect",
-		Title:            "Личный ключ",
-		IntroductionText: "В Толке откройте **Настройки → API ключи → Выпустить ключ** и вставьте ключ сюда. С ним встречи планируются от вашего имени, а на приглашения можно отвечать прямо в Mattermost. Ключ хранится в зашифрованном виде.",
+		Title:            "Личный ключ Толка",
+		IntroductionText: "В Толке нажмите на аватар → **Настройки → API ключи → Выпустить ключ** и вставьте ключ сюда. С ним можно планировать встречи, управлять ими, открывать свою комнату и смотреть записи; в Толке всё это выполняется от вашего имени. Ключ хранится в зашифрованном виде.",
 		SubmitLabel:      "Подключить",
 		Elements:         []model.DialogElement{{DisplayName: "Ключ", Name: "token", Type: "text", SubType: "password", MaxLength: 2000}},
 	}
@@ -359,7 +356,8 @@ func (p *Plugin) commandSchedule(rest string, args *model.CommandArgs) (*model.C
 	if err := p.checkCanStart(user, args.ChannelId); err != nil {
 		return nil, err
 	}
-	if _, err := p.requireClient(); err != nil {
+	// Planning is done as the user, so the key is asked for before the form.
+	if _, err := p.userClient(args.UserId); err != nil {
 		return nil, err
 	}
 	// `/talk schedule edit <id>` opens the same dialog for an existing meeting.

@@ -19,14 +19,19 @@ import (
 // rightsWorld is a scheduled meeting in channel c1. In Talk, "owner"
 // organizes its event and moderates its room; "guest" is invited. "sysadmin"
 // is a Mattermost system admin and "chanadmin" an admin of the channel, and
-// neither takes part in Talk, so neither may do anything.
+// neither takes part in Talk, so neither may do anything. Talk answers room
+// questions only to personal keys, each for its own user; the space key gets
+// no answer, so a right can come only from the user's own key.
 func rightsWorld(t *testing.T) *Plugin {
 	t.Helper()
 	start := time.Date(2026, 11, 20, 7, 0, 0, 0, time.UTC)
 	talkAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.URL.Path == "/api/Rooms/room1" && r.Header.Get("X-Auth-Token") == "key":
+			http.Error(w, "space key", http.StatusForbidden)
 		case r.URL.Path == "/api/Rooms/room1":
-			_, _ = w.Write([]byte(`{"roomName":"room1","moderators":[{"key":"k-owner"}]}`))
+			moderator := r.Header.Get("X-Auth-Token") == "token-owner"
+			_, _ = w.Write([]byte(`{"roomName":"room1","isModerator":` + map[bool]string{true: "true", false: "false"}[moderator] + `,"moderators":[{"key":"k-owner"}]}`))
 		case strings.HasPrefix(r.URL.Path, "/api/EmailCalendar/owner@example.com"):
 			_, _ = w.Write([]byte(`{"items":[{"id":"e1","roomName":"room1","start":"2026-11-20T07:00:00Z","end":"2026-11-20T08:00:00Z",
 				"organizer":{"user":{"key":"k-owner"}},
@@ -67,8 +72,38 @@ func rightsWorld(t *testing.T) *Plugin {
 	return p
 }
 
+// givePersonalKeys connects a personal key "token-<user>" for each user.
+func givePersonalKeys(t *testing.T, p *Plugin, users ...string) {
+	t.Helper()
+	for _, user := range users {
+		encrypted, err := p.encrypt("token-" + user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := p.kvSet(keyPAT+user, personalKey{Token: encrypted}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestWithoutAPersonalKeyTalkIsNotAsked(t *testing.T) {
+	p := rightsWorld(t)
+	m, _ := p.getMeeting("m1")
+	if p.hasRight("owner", m, rightRoom) || p.hasRight("owner", m, rightSchedule) {
+		t.Fatal("the organizer got a right without their own key")
+	}
+	var needKey *userError
+	if _, err := p.controlledMeeting("owner", "m1", rightRoom); !errors.As(err, &needKey) || needKey.code != codePersonalKey {
+		t.Fatalf("room action without a key: %v", err)
+	}
+	if rights := p.meetingRights("owner", m); rights["personal_key"] != false || rights["schedule"] != false {
+		t.Fatalf("card rights without a key: %v", rights)
+	}
+}
+
 func TestRightsComeFromTalkOnly(t *testing.T) {
 	p := rightsWorld(t)
+	givePersonalKeys(t, p, "owner", "guest", "sysadmin", "chanadmin")
 	m, _ := p.getMeeting("m1")
 	cases := []struct {
 		user           string
@@ -94,6 +129,7 @@ func TestRightsComeFromTalkOnly(t *testing.T) {
 
 func TestCardRightsFollowTalk(t *testing.T) {
 	p := rightsWorld(t)
+	givePersonalKeys(t, p, "owner", "guest", "sysadmin")
 	m, _ := p.getMeeting("m1")
 	owner, guest, admin := p.meetingRights("owner", m), p.meetingRights("guest", m), p.meetingRights("sysadmin", m)
 	if owner["schedule"] != true || owner["attendee"] != false {
@@ -129,7 +165,6 @@ func TestUpcomingEditableOnlyForTheOrganizer(t *testing.T) {
 
 func TestInvitationAnswerFollowsTalkAttendees(t *testing.T) {
 	p := rightsWorld(t)
-	p.config.AllowPersonalKeys = true
 	var noKey *userError
 	if err := p.respondInvitation("guest", "m1", true); !errors.As(err, &noKey) || noKey.code != codePersonalKey {
 		t.Fatalf("answer without a personal key: %v", err)
@@ -137,16 +172,28 @@ func TestInvitationAnswerFollowsTalkAttendees(t *testing.T) {
 	// With a key, only an attendee in Talk passes; the organizer and
 	// Mattermost admins do not.
 	for _, user := range []string{"owner", "sysadmin", "chanadmin"} {
-		encrypted, err := p.encrypt("token-" + user)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := p.kvSet(keyPAT+user, personalKey{Token: encrypted}, 0); err != nil {
-			t.Fatal(err)
-		}
+		givePersonalKeys(t, p, user)
 		var refused *userError
 		if err := p.respondInvitation(user, "m1", true); !errors.As(err, &refused) || refused.status != http.StatusForbidden {
 			t.Errorf("%s could answer: %v", user, err)
 		}
+	}
+}
+
+func TestRoomsAreMadeWithTheUsersOwnKey(t *testing.T) {
+	p := rightsWorld(t)
+	givePersonalKeys(t, p, "owner")
+	if client, err := p.roomMaker("owner"); err != nil || !client.Personal() {
+		t.Fatalf("with a key: personal=%v err=%v", client != nil && client.Personal(), err)
+	}
+	// A user without a key may still start a quick meeting, which the space
+	// key makes.
+	if client, err := p.roomMaker("guest"); err != nil || client.Personal() {
+		t.Fatalf("without a key: err=%v", err)
+	}
+	var needKey *userError
+	// A personal room is the user's own and always needs their key.
+	if _, err := p.userClient("guest"); !errors.As(err, &needKey) {
+		t.Fatalf("user client without a key: %v", err)
 	}
 }

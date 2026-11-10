@@ -165,6 +165,7 @@ func TestRefreshKeepsWhatWasTyped(t *testing.T) {
 // Only the organizer in Talk gets the edit form back on refresh.
 func TestRefreshOfAnEditChecksTheRight(t *testing.T) {
 	p := rightsWorld(t)
+	givePersonalKeys(t, p, "owner", "guest", "sysadmin", "chanadmin")
 	ask := func(userID string) string {
 		body := `{"type":"refresh","callback_id":"schedule","state":"edit:m1","submission":{"repeat":"none"}}`
 		req := httptest.NewRequest(http.MethodPost, "/dialogs/schedule", strings.NewReader(body))

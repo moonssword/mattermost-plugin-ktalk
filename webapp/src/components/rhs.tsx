@@ -1,8 +1,8 @@
 import React, {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {useStore} from 'react-redux';
 
-import {openExternal, openPersonalRoom, runCommand, startMeeting} from '../actions';
-import {meetingsVersion, rhsRecording} from '../bus';
+import {openExternal, openPersonalRoom, requestKey, runCommand, startMeeting} from '../actions';
+import {keyRequest, meetingsVersion, rhsRecording} from '../bus';
 import {api, ApiError, isNetworkError, NETWORK_ERROR} from '../client';
 import {useLocale, useT} from '../i18n';
 import {clampPeriod, defaultPeriod, filterTranscript, formatClock, periodBounds, repeatLabel, secondsBetween, speakerColors} from '../logic';
@@ -10,9 +10,10 @@ import type {MeetingView, RecordingArtifacts, RecordingItem, UpcomingEvent} from
 
 import {useCallPlace} from './call_menu';
 import Dropdown from './dropdown';
-import {CalendarIcon, CameraIcon, ChevronLeftIcon, ClockIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, PhoneIcon, RoomIcon, UnavailableIcon} from './icons';
+import {CalendarIcon, CameraIcon, ChevronLeftIcon, ClockIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, PhoneIcon, RecordIcon, RoomIcon, SlidersIcon, UnavailableIcon, VideoIcon} from './icons';
 import Markdown from './markdown';
 import {PersonalKeyPanel} from './personal_key';
+import SettingsPanel from './settings_panel';
 import {useConfig, useVisualStyle} from './use_style';
 
 const REFRESH_MS = 30000;
@@ -221,7 +222,17 @@ function NowTab({onCount}: {onCount: (count: number) => void}) {
         return <Skeleton/>;
     }
     if (data.length === 0) {
-        return <Empty text={t('Нет идущих встреч в ваших каналах.')}/>;
+        return (
+            <Empty
+                text={t('Нет идущих встреч в ваших каналах.')}
+                icon={
+                    <VideoIcon
+                        size={28}
+                        weight={1.6}
+                    />
+                }
+            />
+        );
     }
     const live = data.filter((meeting) => meeting.status === 'live');
     const waiting = data.filter((meeting) => meeting.status !== 'live');
@@ -272,7 +283,15 @@ function UpcomingTab({onCount}: {onCount: (count: number) => void}) {
         return (
             <>
                 {keyPanel}
-                <Empty text={t('Нет встреч на ближайшую неделю.')}/>
+                <Empty
+                    text={t('Нет встреч на ближайшую неделю.')}
+                    icon={
+                        <CalendarIcon
+                            size={28}
+                            weight={1.6}
+                        />
+                    }
+                />
             </>
         );
     }
@@ -322,6 +341,12 @@ function UpcomingTab({onCount}: {onCount: (count: number) => void}) {
     );
 }
 
+/** Marks a list that needs the personal key rather than an error text. */
+const KEY_NEEDED = 'personal_key_required';
+
+/** How many empty pages of recordings are passed over before giving up. */
+const MAX_EMPTY_PAGES = 4;
+
 function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
     const t = useT();
     const locale = useLocale();
@@ -337,7 +362,10 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
         return () => clearTimeout(timer);
     }, [query]);
 
-    const load = useCallback(async (page: string, previous: RecordingItem[], retried = false): Promise<void> => {
+    // A page may hold none of the user's recordings while older pages exist.
+    // Such pages are passed over quietly a few times, so an empty list never
+    // sits above a "Show more" button.
+    const load = useCallback(async (page: string, previous: RecordingItem[], retried = false, skipped = 0): Promise<void> => {
         try {
             const params = new URLSearchParams();
             if (debounced) {
@@ -350,13 +378,22 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
             params.set('from', bounds.from);
             params.set('to', bounds.to);
             const result = await api<{recordings: RecordingItem[]; next_page: string}>('GET', `/recordings?${params}`);
-            setItems([...previous, ...result.recordings]);
-            setNext(result.next_page);
+            const all = [...previous, ...result.recordings];
+            if (all.length === 0 && result.next_page && skipped < MAX_EMPTY_PAGES) {
+                await load(result.next_page, all, false, skipped + 1);
+                return;
+            }
+            setItems(all);
+            setNext(all.length > 0 ? result.next_page : '');
             setError('');
         } catch (e) {
             // A dropped connection is retried once quietly before it is shown.
             if (isNetworkError(e) && !retried) {
-                setTimeout(() => load(page, previous, true), RETRY_MS[1]);
+                setTimeout(() => load(page, previous, true, skipped), RETRY_MS[1]);
+                return;
+            }
+            if ((e as ApiError).code === 'personal_key_required') {
+                setError(KEY_NEEDED);
                 return;
             }
             setError(isNetworkError(e) ? t('Нет связи с сервером. Обновите вкладку чуть позже.') : (e as Error).message);
@@ -414,9 +451,20 @@ function RecordingsTab({onOpen}: {onOpen: (key: string) => void}) {
                 </div>
                 <div className='ktk-period__hint'>{t('Период не больше месяца')}</div>
             </fieldset>
-            {error && <div className='ktk-error'>{error}</div>}
+            {error === KEY_NEEDED && <PersonalKeyPanel/>}
+            {error && error !== KEY_NEEDED && <div className='ktk-error'>{error}</div>}
             {!items && !error && <Skeleton/>}
-            {items?.length === 0 && <Empty text={t(debounced ? 'Ничего не найдено за этот период.' : 'За этот период записей нет.')}/>}
+            {items?.length === 0 && (
+                <Empty
+                    text={t(debounced ? 'Ничего не найдено за этот период.' : 'За этот период записей нет.')}
+                    icon={
+                        <RecordIcon
+                            size={28}
+                            weight={1.6}
+                        />
+                    }
+                />
+            )}
             {items?.map((item) => (
                 <div
                     className='ktk-item'
@@ -513,7 +561,9 @@ function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKe
         kind='text'
         rows={6}
     />;
-    if (error) {
+    if (error?.code === KEY_NEEDED) {
+        body = <PersonalKeyPanel/>;
+    } else if (error) {
         body = <Problem error={error}/>;
     } else if (data && section === 'transcript') {
         const lines = filterTranscript(data.transcript.lines || [], query);
@@ -600,6 +650,28 @@ const TABS = [
     {id: 'recordings', label: 'Записи'},
 ];
 
+const KEY_LATER = 'konturtalk.personal_key_later';
+
+/** The user put off connecting a key; the panel then asks more quietly. */
+function keyLater(): boolean {
+    try {
+        return localStorage.getItem(KEY_LATER) === '1';
+    } catch {
+        return false;
+    }
+}
+
+function rememberLater() {
+    try {
+        localStorage.setItem(KEY_LATER, '1');
+    } catch {
+        // Without storage the full panel simply comes back next time.
+    }
+}
+
+/** The panel tells the server once a session that the user uses the plugin. */
+let reported = false;
+
 const Sidebar = () => {
     const t = useT();
     const store = useStore();
@@ -610,6 +682,25 @@ const Sidebar = () => {
     const [visited, setVisited] = useState<Record<string, boolean>>({now: true, upcoming: true});
     const [counts, setCounts] = useState<Record<string, number>>({});
     const opened = useSyncExternalStore(rhsRecording.subscribe, rhsRecording.get);
+    // The settings page, and an action waiting for the personal key.
+    const [page, setPage] = useState<'' | 'settings'>('');
+    const waiting = useSyncExternalStore(keyRequest.subscribe, keyRequest.get);
+    const [later, setLater] = useState(keyLater);
+    useEffect(() => {
+        if (!reported && config?.configured && config.enabled) {
+            reported = true;
+            api('POST', '/seen').catch(() => {
+                reported = false;
+            });
+        }
+    }, [config?.configured, config?.enabled]);
+    const schedule = () => {
+        if (!config?.personal_key) {
+            requestKey(store, t('Запланировать встречу'), () => runCommand(store, '/talk schedule'));
+            return;
+        }
+        runCommand(store, '/talk schedule');
+    };
     const countNow = useCallback((count: number) => setCounts((old) => ({...old, now: count})), []);
     const countUpcoming = useCallback((count: number) => setCounts((old) => ({...old, upcoming: count})), []);
 
@@ -623,6 +714,53 @@ const Sidebar = () => {
                 section={opened.section}
                 onBack={() => rhsRecording.set(null)}
             />
+        );
+    } else if (page || waiting) {
+        const back = () => {
+            keyRequest.set(null);
+            setPage('');
+        };
+        content = (
+            <>
+                <div className='ktk-rhs__actions'>
+                    <button
+                        className='ktk-back'
+                        onClick={back}
+                    >
+                        <ChevronLeftIcon
+                            size={16}
+                            weight={1.8}
+                        />
+                        {t('Назад')}
+                    </button>
+                </div>
+                <div className='ktk-rhs__scroll'>
+                    {waiting ? (
+                        <>
+                            <div className='ktk-detail-title'>{waiting.label}</div>
+                            <p className='ktk-set__lead'>
+                                {t(config?.personal_key ? 'Ключ подключён. Можно продолжить.' : 'Это действие выполняется в Толке от вашего имени, поэтому нужен личный ключ.')}
+                            </p>
+                            {config?.personal_key ? (
+                                <button
+                                    className='ktk-btn ktk-btn--primary'
+                                    onClick={() => {
+                                        back();
+                                        waiting.proceed();
+                                    }}
+                                >
+                                    {t('Продолжить')}
+                                </button>
+                            ) : <PersonalKeyPanel/>}
+                        </>
+                    ) : (
+                        <>
+                            <div className='ktk-detail-title'>{t('Настройки')}</div>
+                            <SettingsPanel/>
+                        </>
+                    )}
+                </div>
+            </>
         );
     } else {
         content = (
@@ -669,7 +807,7 @@ const Sidebar = () => {
                             className='ktk-btn ktk-btn--secondary ktk-head__aux'
                             title={t('Запланировать встречу')}
                             aria-label={t('Запланировать встречу')}
-                            onClick={() => runCommand(store, '/talk schedule')}
+                            onClick={schedule}
                         >
                             <CalendarIcon/>
                             <span className='ktk-wide'>{t('Запланировать')}</span>
@@ -684,7 +822,37 @@ const Sidebar = () => {
                         <RoomIcon/>
                         <span className='ktk-wide'>{t('Комната')}</span>
                     </button>
+                    <button
+                        className='ktk-btn ktk-btn--secondary ktk-head__aux ktk-head__icon'
+                        title={t('Настройки')}
+                        aria-label={t('Настройки')}
+                        onClick={() => setPage('settings')}
+                    >
+                        <SlidersIcon size={16}/>
+                    </button>
                 </div>
+                {/* Without a key the panel asks for one at once, with the form
+                    open; "Later" folds it into one quiet line that can be
+                    hidden. The other tabs show the form themselves, so this
+                    stays on the first one. */}
+                {!config?.link_only && config && !config.personal_key && tab === 'now' && (
+                    <div className='ktk-rhs__offer'>
+                        {later ? (
+                            <PersonalKeyPanel
+                                key='line'
+                                inline={true}
+                            />
+                        ) : (
+                            <PersonalKeyPanel
+                                key='card'
+                                onLater={() => {
+                                    rememberLater();
+                                    setLater(true);
+                                }}
+                            />
+                        )}
+                    </div>
+                )}
                 {!config?.link_only && (
                     <div
                         className='ktk-tabs'

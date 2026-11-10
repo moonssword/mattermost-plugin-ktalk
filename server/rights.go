@@ -12,7 +12,8 @@ import (
 // roles: neither channel admins nor system admins get anything extra.
 //
 //   - The room is run by its moderators in Talk: recording, ending for
-//     everyone, the PIN, guest access and the waiting room.
+//     everyone, the PIN, guest access and the waiting room. Talk is asked
+//     with the user's personal key, and answers for that user itself.
 //   - A scheduled meeting is changed or cancelled by the organizer of its
 //     calendar event in Talk.
 //   - An invitation is answered by attendees of that event in Talk.
@@ -39,14 +40,19 @@ func (p *Plugin) talkKeyOf(userID string) string {
 	return identity.Key
 }
 
-// isModerator asks Talk whether a Talk user moderates a room.
-func isModerator(ctx context.Context, client *talk.Client, roomName, key string) (bool, error) {
-	room, err := client.GetRoom(ctx, roomName)
+// isModerator asks Talk, with the user's personal key, whether the user runs
+// a room. Talk's own answer covers rooms without moderators, which everybody
+// runs; the list of moderators backs it up.
+func isModerator(ctx context.Context, personal *talk.Client, roomName, key string) (bool, error) {
+	room, err := personal.GetRoom(ctx, roomName)
 	if err != nil {
 		return false, err
 	}
+	if room.IsModerator {
+		return true, nil
+	}
 	for i := range room.Moderators {
-		if room.Moderators[i].Key == key {
+		if key != "" && room.Moderators[i].Key == key {
 			return true, nil
 		}
 	}
@@ -84,15 +90,15 @@ func (p *Plugin) hasRight(userID string, m *Meeting, right meetingRight) bool {
 		return false
 	}
 	key := p.talkKeyOf(userID)
-	client := p.client()
-	if key == "" || client == nil {
+	personal := p.personalClient(userID)
+	if key == "" || personal == nil {
 		return false
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
 	switch right {
 	case rightRoom:
-		ok, err := isModerator(ctx, client, m.RoomName, key)
+		ok, err := isModerator(ctx, personal, m.RoomName, key)
 		if err != nil {
 			p.noteAPIError(err)
 			p.API.LogWarn("Room moderators unavailable", "meeting_id", m.ID, "error", err.Error())
@@ -124,6 +130,10 @@ func (p *Plugin) controlledMeeting(userID, meetingID string, right meetingRight)
 	if m.LinkOnly && right != rightRing {
 		return nil, newUserError(http.StatusConflict, "Встреча создана без API-ключа: управлять ей можно только в Толке.")
 	}
+	// Talk answers for the user only through their own key.
+	if right != rightRing && p.personalClient(userID) == nil {
+		return nil, errPersonalKeyRequired
+	}
 	if !p.hasRight(userID, m, right) {
 		return nil, errForbidden
 	}
@@ -136,18 +146,24 @@ func (p *Plugin) controlledMeeting(userID, meetingID string, right meetingRight)
 // still asks Talk itself.
 func (p *Plugin) meetingRights(userID string, m *Meeting) map[string]any {
 	key := p.talkKeyOf(userID)
-	rights := map[string]any{"room": false, "schedule": false, "ring": userID == m.CreatorID && m.Status == statusRinging, "attendee": false, "key": key}
+	hasKey := p.personalClient(userID) != nil
+	rights := map[string]any{"room": false, "schedule": false, "ring": userID == m.CreatorID && m.Status == statusRinging, "attendee": false, "key": key, "personal_key": hasKey}
 	if key == "" || m.LinkOnly || !m.isOpen() {
 		return rights
 	}
 	if sc := m.Schedule; sc != nil && m.Status == statusScheduled {
 		organizer := sc.OrganizerKey
-		rights["schedule"] = organizer != "" && organizer == key
+		rights["schedule"] = hasKey && organizer != "" && organizer == key
+		// Being invited is Talk's data, not a right: without a key the card
+		// still finds the user's row and asks for the key to answer.
 		for _, attendee := range sc.Attendees {
 			if attendee.Key == key && key != organizer {
 				rights["attendee"] = true
 			}
 		}
+	}
+	if !hasKey {
+		return rights
 	}
 	if m.Status == statusLive || m.Status == statusWaiting || m.Status == statusRinging {
 		rights["room"] = p.hasRight(userID, m, rightRoom)

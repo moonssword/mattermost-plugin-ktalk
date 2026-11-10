@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- **Users act in Talk with their own personal keys.** Creating rooms, the personal room, the PIN, guests, the waiting room, *End for everyone*, planning, invitations, the *Recordings* tab and the summary texts all go through the user's personal key, so Talk applies each person's rights. Room moderators are now recognised by Talk's own answer to the user's key. The space key stays for the plugin as a whole, for ringing in the Talk app and for starting a recording, which Talk refuses to personal keys and which the plugin starts only for a room moderator.
+- Without a personal key a user can still start a meeting or a call, created with the space key, join meetings and answer calls; everything else needs a key. The *Allow personal API keys* and *Calendar with personal keys only* settings are gone, and planning always needs a personal key.
+- Any action that needs a key opens the key form in the sidebar and then offers to continue. A card tells the person who started a meeting without a key that running it needs one, and an invitation can be answered once a key is connected.
+- The space key needs only read access to `calendar`.
+
+### Added
+
+- Until a personal key is connected, the sidebar asks for it at once with the key form open. *Later* folds the form into one line about what a key opens, which can be hidden too.
+- The *Connection* block in the System Console shows how many users of the plugin (those who opened the sidebar, started a meeting or connected a key) have connected a personal key.
+
+- Plugin settings inside the sidebar, behind a sliders button: the personal key, then *Appearance*, *Meetings* and *Calls and notices* with lists for choices and switches for yes-or-no settings, and the plugin version at the bottom. They are the same preferences as in **Settings → Контур.Толк** and are saved at once.
+
+### Changed
+
+- A link nobody has opened for two hours leaves the *Now* tab. The room still works and is still watched, so the meeting comes back if someone joins.
+- The *Recordings* tab reads Talk's own list of the user's recordings.
+- Empty *Now*, *Upcoming* and *Recordings* lists show a mark above the text, as the summary and transcript already did.
+
+### Fixed
+
+- The *Recordings* tab of a busy space showed an empty list with *Show more*: only the first hundred space recordings were checked. Empty pages are now passed over, and *Show more* appears only under recordings.
+- Summaries with highlights and minutes appeared as raw JSON. Headlines, topics and tasks are now shown as Talk shows them, and parts hidden in Talk stay hidden.
+- The end of a long transcript, summary or settings page could not be scrolled into view in the sidebar.
+- The recordings search field used the browser's font instead of the panel's.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added

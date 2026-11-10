@@ -247,3 +247,25 @@ func TestClientDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("want the redirect as an error, got %v", err)
 	}
 }
+
+func TestSummaryPartsThatCarryJSON(t *testing.T) {
+	hidden := SummaryChunk{Type: "protocolSum", Text: `{"title":"Скрыто"}`}
+	hidden.HiddenStatus = &struct {
+		IsHidden bool `json:"isHidden"`
+	}{IsHidden: true}
+	s := &Summary{Chunks: []SummaryChunk{
+		{Type: "briefsummaryWithHighlights", Text: `{"headline":"Запуск","summary":"Договорились о сроках."}`},
+		{Type: "protocolThemes", Text: `{"title":"Темы","topics":[{"title":"Бюджет","content":"Утвердили."}]}`},
+		{Type: "protocolNextSteps", Text: `{"title":"Задачи","tasks":[{"task":"Отчёт","responsible":"Анна","deadline":"пятница"},{"task":"Счёт"}]}`},
+		hidden,
+		{Type: "briefsummary", Text: "{не JSON"},
+		{Type: "briefsummary", Text: "Обычный текст"},
+	}}
+	want := "**Запуск**\n\nДоговорились о сроках." +
+		"\n\n**Темы**\n\n- **Бюджет** · Утвердили." +
+		"\n\n**Задачи**\n\n- Отчёт\n  - Ответственный: Анна\n  - Срок: пятница\n- Счёт" +
+		"\n\n{не JSON\n\nОбычный текст"
+	if got := s.Text(); got != want {
+		t.Fatalf("text =\n%s\nwant\n%s", got, want)
+	}
+}

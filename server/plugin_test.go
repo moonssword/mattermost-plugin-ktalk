@@ -713,3 +713,23 @@ func TestParticipantValueReadsAndRoundTrips(t *testing.T) {
 		t.Errorf("bare username %q", got)
 	}
 }
+
+func TestUnopenedLinkLeavesCurrentMeetingsAfterTwoHours(t *testing.T) {
+	now := time.Now()
+	m := &Meeting{Status: statusWaiting, Kind: kindAdhoc, CreatedAt: now.Add(-3 * time.Hour)}
+	if !m.idle(now) {
+		t.Fatal("a link nobody opened for three hours is still listed")
+	}
+	if (&Meeting{Status: statusWaiting, Kind: kindAdhoc, CreatedAt: now.Add(-time.Hour)}).idle(now) {
+		t.Fatal("an hour-old link left the list")
+	}
+	started := now.Add(-150 * time.Minute)
+	m.StartedAt = &started
+	if m.idle(now) {
+		t.Fatal("a meeting people joined left the list")
+	}
+	m.StartedAt, m.Status = nil, statusLive
+	if m.idle(now) {
+		t.Fatal("a live meeting left the list")
+	}
+}

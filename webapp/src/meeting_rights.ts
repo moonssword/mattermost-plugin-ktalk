@@ -14,9 +14,11 @@ export interface MeetingRights {
     attendee: boolean;
     /** The user's key in Talk, to find their own row among attendees. */
     key: string;
+    /** The user has connected a personal key; rights need it. */
+    personal_key: boolean;
 }
 
-export const NO_RIGHTS: MeetingRights = {room: false, schedule: false, ring: false, attendee: false, key: ''};
+export const NO_RIGHTS: MeetingRights = {room: false, schedule: false, ring: false, attendee: false, key: '', personal_key: false};
 
 const TTL_MS = 30000;
 const answers = new Map<string, {rights: MeetingRights; at: number}>();
@@ -27,8 +29,9 @@ const pending = new Map<string, Promise<void>>();
  * answered, none are given, so a control never shows to someone who cannot
  * use it. The server checks every action again.
  */
-export function useMeetingRights(meetingId: string | undefined, status: string | undefined, enabled: boolean): MeetingRights {
-    const id = meetingId && enabled ? `${meetingId}:${status || ''}` : '';
+export function useMeetingRights(meetingId: string | undefined, status: string | undefined, enabled: boolean, personalKey = false): MeetingRights {
+    // Rights depend on the personal key, so connecting one asks again.
+    const id = meetingId && enabled ? `${meetingId}:${status || ''}:${personalKey ? 'key' : ''}` : '';
     const known = () => {
         const answer = id ? answers.get(id) : undefined;
         return answer && Date.now() - answer.at < TTL_MS ? answer.rights : null;
@@ -62,6 +65,11 @@ export function useMeetingRights(meetingId: string | undefined, status: string |
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
     return rights;
+}
+
+/** Forgets every answer, after the personal key is connected or removed. */
+export function forgetAllMeetingRights() {
+    answers.clear();
 }
 
 /** Forgets the rights of a meeting, after an answer or a change. */

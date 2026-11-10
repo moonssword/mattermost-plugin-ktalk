@@ -347,6 +347,17 @@ func applyRoomState(m *Meeting, room *talk.Room, now time.Time) (finished bool) 
 	return false
 }
 
+// idleListing is how long a link nobody has opened stays among current
+// meetings. The room keeps working and is still watched until
+// unusedMeetingTTL, so a late join brings the meeting back to the list.
+const idleListing = 2 * time.Hour
+
+// idle tells that a meeting nobody has joined has waited too long to be
+// listed as current. Calls have their own short deadline.
+func (m *Meeting) idle(now time.Time) bool {
+	return m.Status == statusWaiting && m.Kind != kindCall && m.StartedAt == nil && now.Sub(m.CreatedAt) > idleListing
+}
+
 // waitingDeadline is when an empty meeting that nobody has joined closes.
 func waitingDeadline(m *Meeting) time.Time {
 	if m.Kind != kindCall {

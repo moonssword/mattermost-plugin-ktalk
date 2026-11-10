@@ -42,11 +42,9 @@ type configuration struct {
 	PostSummaries        bool
 	RecordingLinkAccess  string
 	EnableCalls          bool
-	AllowPersonalKeys    bool
 	AllowGuests          bool
 	RequireVerifiedEmail bool
 	ReminderMinutes      int
-	CalendarPersonalOnly bool
 	SetMeetingStatus     bool
 	RingInTalk           bool
 	CardStyle            string

@@ -1,7 +1,7 @@
 import React from 'react';
 import type {Store} from 'redux';
 
-import {discussPost, getConfig, loadConfig, runCommand, startMeeting} from './actions';
+import {bindStore, discussPost, getConfig, loadConfig, runCommand, startMeeting} from './actions';
 import {addIncoming, meetingsVersion, removeIncoming, type IncomingCall} from './bus';
 import CallMenuRoot, {CallDropdownSublabel, HeaderCallButton, callButtonAction} from './components/call_menu';
 import IncomingCalls from './components/incoming_call';
@@ -16,6 +16,7 @@ import {injectStyles} from './components/styles';
 import {tFromState} from './i18n';
 import {cleanRecentStatuses, csrfFromCookie, isSpaceLink} from './logic';
 import {PLUGIN_ID} from './manifest';
+import {settingSections} from './settings';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Registry = any;
@@ -29,6 +30,7 @@ class Plugin {
     public async initialize(registry: Registry, store: Store) {
         this.registry = registry;
         this.store = store;
+        bindStore(store);
         injectStyles();
 
         // These stay for everyone. Cards decide on their own what to show, and
@@ -168,85 +170,28 @@ class Plugin {
     }
 
     private registerUserSettings(t: (text: string) => string) {
-        const option = (value: string, text: string) => ({value, text});
         const config = getConfig();
         this.registry.registerUserSettings?.({
             id: PLUGIN_ID,
             uiName: t('Контур.Толк'),
             sections: [
-                {
-                    title: 'Вид карточек и панели',
+                ...settingSections(config).map((section) => ({
+                    title: section.title,
                     settings: [{
-                        name: 'style',
+                        name: section.name,
                         type: 'radio',
-                        default: 'default',
-                        options: [
-                            option('default', 'По умолчанию (выбирает администратор)'),
-                            option('current', 'Системный'),
-                            option('cards', 'Карточки'),
-                            option('compact', 'Компактный'),
-                        ],
+                        default: section.default,
+                        options: section.options,
                     }],
-                },
+                })),
                 {
-                    title: 'Показывать в статусе Mattermost, что я на встрече',
-                    settings: [{
-                        name: 'meeting_status',
-                        type: 'radio',
-                        default: 'true',
-                        options: [option('true', 'Да'), option('false', 'Нет')],
-                    }],
-                },
-                {
-                    title: 'Как открывать встречу',
-                    settings: [{
-                        name: 'open_mode',
-                        type: 'radio',
-                        default: 'tab',
-                        options: [option('tab', 'В новой вкладке'), option('window', 'В отдельном окне')],
-                    }],
-                },
-                {
-                    title: 'Имена комнат',
-                    settings: [{
-                        name: 'naming',
-                        type: 'radio',
-                        default: config?.naming || 'words',
-                        options: [
-                            option('words', 'Случайные слова'),
-                            option('uuid', 'UUID'),
-                            option('context', 'Команда и канал'),
-                            option('ask', 'Спрашивать при создании'),
-                        ],
-                    }],
-                },
-                {
-                    title: 'Сообщать в личные сообщения о готовности записи',
-                    settings: [{
-                        name: 'notify_recording',
-                        type: 'radio',
-                        default: 'false',
-                        options: [option('true', 'Да'), option('false', 'Нет')],
-                    }],
-                },
-                {
-                    title: 'Принимать звонки из Mattermost',
-                    settings: [{
-                        name: 'accept_calls',
-                        type: 'radio',
-                        default: 'true',
-                        options: [option('true', 'Да'), option('false', 'Нет')],
-                    }],
-                },
-                // Shown only when the administrator allows personal keys.
-                ...(config?.personal_keys ? [{
                     title: 'Личный ключ Толка',
                     settings: [{
                         name: 'personal_key',
                         type: 'custom',
                         component: PersonalKeySetting,
                     }],
-                }] : []),
+                },
             ],
         });
     }

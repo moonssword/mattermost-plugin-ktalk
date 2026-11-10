@@ -57,7 +57,7 @@ export const CSS = `
 .ktk-av:first-child{margin-left:0}
 .ktk-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .ktk-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:0;border-radius:4px;background:transparent;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none!important}
-.ktk-btn:focus-visible,.ktk-link:focus-visible,.ktk-input:focus-visible{outline:2px solid var(--k-btn);outline-offset:1px}
+.ktk-btn:focus-visible,.ktk-link:focus-visible{outline:2px solid var(--k-btn);outline-offset:1px}
 .ktk-tab:focus-visible{outline:2px solid var(--k-btn);outline-offset:-2px;border-radius:4px}
 .ktk-btn--primary{background:var(--k-btn);color:var(--k-btn-fg)!important}
 .ktk-btn--primary:hover{background:linear-gradient(0deg,rgba(0,0,0,.08),rgba(0,0,0,.08)),var(--k-btn)}
@@ -72,14 +72,16 @@ export const CSS = `
 .ktk-md li{margin:0}
 .ktk-md h1,.ktk-md h2,.ktk-md h3,.ktk-md h4{margin:8px 0 4px;font-size:14px;font-weight:600;line-height:20px}
 .ktk-card__title .ktk-md p{display:inline;margin:0}
-.ktk-rhs{display:flex;flex-direction:column;height:100%;font-size:14px;container:ktk-rhs/inline-size}
+.ktk-rhs{display:flex;flex-direction:column;height:100%;min-height:0;font-size:14px;container:ktk-rhs/inline-size}
 .ktk-tabs{display:flex;gap:4px;padding:4px 12px 0;border-bottom:1px solid rgba(var(--k-fg-rgb),.12)}
 .ktk-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 10px;border:0;border-bottom:2px solid transparent;background:none;font-size:13px;font-weight:600;color:rgba(var(--k-fg-rgb),.64);cursor:pointer;white-space:nowrap}
 .ktk-tab:hover{color:var(--k-fg)}
 .ktk-tab--active,.ktk-tab--active:hover{color:var(--k-btn);border-bottom-color:var(--k-btn)}
 .ktk-tab__count{min-width:18px;padding:0 5px;border-radius:999px;font-size:10.5px;font-weight:700;line-height:16px;text-align:center;background:rgba(var(--k-fg-rgb),.08);color:var(--k-fg)}
 .ktk-rhs__actions{display:flex;flex-wrap:wrap;gap:8px;padding:12px}
-.ktk-rhs__scroll{flex:1;overflow:auto;padding:8px 12px 16px;min-width:0}
+.ktk-rhs__offer{padding:0 12px 8px}
+.ktk-rhs__offer:empty{display:none}
+.ktk-rhs__scroll{flex:1;overflow:auto;padding:8px 12px 16px;min-width:0;min-height:0}
 .ktk-panel[hidden]{display:none}
 .ktk-section-title{margin:8px 0 2px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:rgba(var(--k-fg-rgb),.56)}
 /* A list row: text on the left, short actions on the right. */
@@ -97,7 +99,9 @@ export const CSS = `
 .ktk-back{display:inline-flex;align-items:center;gap:2px;height:28px;margin-left:-6px;padding:0 10px 0 4px;border:0;border-radius:4px;background:none;color:rgba(var(--k-fg-rgb),.72);font-size:13px;font-weight:600;cursor:pointer;transition:background .12s ease,color .12s ease}
 .ktk-back:hover{background:rgba(var(--k-fg-rgb),.08);color:var(--k-fg)}
 .ktk-back:focus-visible{outline:2px solid var(--k-btn);outline-offset:1px}
-.ktk-input{width:100%;height:32px;margin-bottom:8px;padding:0 10px;border:1px solid rgba(var(--k-fg-rgb),.24);border-radius:4px;background:var(--k-bg);color:var(--k-fg)}
+.ktk-input{width:100%;height:32px;margin-bottom:8px;padding:0 10px;border:1px solid rgba(var(--k-fg-rgb),.24);border-radius:4px;background:var(--k-bg);color:var(--k-fg);font:inherit;font-size:13px;transition:border-color .12s ease,box-shadow .12s ease}
+.ktk-input:hover{border-color:rgba(var(--k-fg-rgb),.48)}
+.ktk-input:focus{border-color:var(--k-btn);box-shadow:inset 0 0 0 1px var(--k-btn);outline:none}
 .ktk-input::placeholder{color:rgba(var(--k-fg-rgb),.56)}
 .ktk-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:20px}
 .ktk-md.ktk-text{white-space:normal}
@@ -146,6 +150,7 @@ export const CSS = `
 .ktk-keyline-wrap{display:grid;gap:6px;margin:2px 0 6px}
 .ktk-keyline-wrap .ktk-input{margin:0}
 .ktk-keyline{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:rgba(var(--k-fg-rgb),.64)}
+.ktk-card__keyline{gap:4px;margin-top:10px;flex-wrap:wrap}
 .ktk-keyline__text{flex:1;min-width:0}
 .ktk-keyline__text b{font-weight:600;color:var(--k-fg)}
 .ktk-keyline>.ktk-link{flex:none}
@@ -314,7 +319,7 @@ export const CSS = `
 
 /* ---- Panel header: one row at any width ---- */
 /* Narrow: the main action keeps its label, the others are square icons.
-   From 390 px all three carry short labels. Without container queries the
+   From 440 px the actions carry short labels; the settings button stays an icon. Without container queries the
    narrow layout stays, with padded icon buttons. */
 .ktk-rhs__head{flex-wrap:nowrap}
 .ktk-head__main{flex:1;min-width:0}
@@ -325,11 +330,31 @@ export const CSS = `
 .ktk-split__more .ktk-caret{margin:0;opacity:.9}
 .ktk-head__main span{overflow:hidden;text-overflow:ellipsis}
 .ktk-head__aux{flex:none}
+.ktk-rhs .ktk-head__icon{aspect-ratio:1;padding:0;margin-left:auto}
+/* ---- Settings page ---- */
+.ktk-settings{display:flex;flex-direction:column;padding-top:4px}
+.ktk-set{min-width:0;margin:0;padding:16px 0;border:0;border-bottom:1px solid rgba(var(--k-fg-rgb),.12)}
+.ktk-set:first-child{padding-top:4px}
+.ktk-set__title{margin:0 0 10px;padding:0;font-size:12px;font-weight:600;line-height:16px;letter-spacing:.04em;text-transform:uppercase;color:rgba(var(--k-fg-rgb),.56)}
+.ktk-set__row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:36px;padding:2px 0}
+.ktk-set__label{flex:1;min-width:0;margin:0;font-size:14px;font-weight:400;line-height:20px;color:var(--k-fg)}
+.ktk-select{flex:none;width:52%;max-width:220px;height:32px;padding:0 28px 0 10px;border:1px solid rgba(var(--k-fg-rgb),.24);border-radius:4px;color:var(--k-fg);font:inherit;font-size:13px;cursor:pointer;appearance:none;background:var(--k-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 9px center;transition:border-color .12s ease,box-shadow .12s ease}
+.ktk-select:hover{border-color:rgba(var(--k-fg-rgb),.48)}
+.ktk-select:focus{border-color:var(--k-btn);box-shadow:inset 0 0 0 1px var(--k-btn);outline:none}
+.ktk-switch{position:relative;flex:none;width:36px;height:20px;padding:0;border:0;border-radius:10px;background:rgba(var(--k-fg-rgb),.24);cursor:pointer;transition:background .15s ease}
+.ktk-switch[aria-checked="true"]{background:var(--k-btn)}
+.ktk-switch__knob{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.24);transition:transform .15s ease}
+.ktk-switch[aria-checked="true"] .ktk-switch__knob{transform:translateX(16px)}
+.ktk-switch:focus-visible{outline:2px solid var(--k-btn);outline-offset:2px}
+.ktk-switch:disabled{opacity:.6;cursor:progress}
+.ktk-set__foot{display:grid;gap:4px;padding-top:14px;font-size:12px;line-height:16px;color:rgba(var(--k-fg-rgb),.56)}
+@media (prefers-reduced-motion:reduce){.ktk-switch,.ktk-switch__knob{transition:none}}
+.ktk-set__lead{margin:0 0 12px;font-size:13px;line-height:18px;color:rgba(var(--k-fg-rgb),.72)}
 .ktk-wide{display:none}
-@container ktk-rhs (max-width:389.98px){
+@container ktk-rhs (max-width:439.98px){
   .ktk-rhs .ktk-head__aux{aspect-ratio:1;padding:0}
 }
-@container ktk-rhs (min-width:390px){
+@container ktk-rhs (min-width:440px){
   .ktk-head__main{flex:none}
   .ktk-wide{display:inline}
   .ktk-narrow{display:none}

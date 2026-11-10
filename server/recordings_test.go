@@ -32,6 +32,12 @@ func recordingWorld(t *testing.T) (*Plugin, map[string]*model.User) {
 		switch {
 		case len(key) == 3 && key[0] == "Recordings" && key[2] == "access" && grants[key[1]] != "":
 			_, _ = w.Write([]byte(grants[key[1]]))
+		case len(key) == 3 && key[0] == "Recordings" && key[2] == "access":
+			http.Error(w, "unknown", http.StatusNotFound)
+		case len(key) == 1 && key[0] == "Recordings":
+			// The personal list: r2 from last week, r1 from yesterday, then
+			// one from two months ago, newest first.
+			_, _ = w.Write([]byte(`{"recordings":[{"id":"r1","createdDate":"` + daysAgo(1) + `"},{"id":"r2","createdDate":"` + daysAgo(7) + `"},{"id":"r0","createdDate":"` + daysAgo(60) + `"}]}`))
 		case len(key) == 3 && key[0] == "Domain" && key[1] == "recordings" && grants[key[2]] != "":
 			_, _ = w.Write([]byte(`{"key":"` + key[2] + `","title":"Встреча"}`))
 		default:
@@ -39,6 +45,9 @@ func recordingWorld(t *testing.T) (*Plugin, map[string]*model.User) {
 		}
 	}))
 	t.Cleanup(talkAPI.Close)
+	// accessAsked counts grants requests, the costly part of a listing.
+	accessAsked = 0
+	talkAPI.Config.Handler = countAccess(talkAPI.Config.Handler)
 
 	users := map[string]*model.User{
 		"anna":       {Id: "anna", Email: "anna@example.com", EmailVerified: true},
@@ -124,15 +133,16 @@ func TestRecordingPeriodIsAtMostAMonth(t *testing.T) {
 }
 
 // talkRecorder is a Talk space that starts recording r9 and records every
-// change of access it is asked for.
+// change of access it is asked for. Talk tells u1 through u1's personal key
+// that u1 moderates the room, and takes recording only from the space key.
 func talkRecorder(t *testing.T) (*Plugin, map[string][]byte, *[]string) {
 	t.Helper()
 	patches := []string{}
 	talkAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/Rooms/room1":
-			_, _ = w.Write([]byte(`{"roomName":"room1","moderators":[{"key":"k-owner"}]}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/api/Recordings/start":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/Rooms/room1" && r.Header.Get("X-Auth-Token") == "token-u1":
+			_, _ = w.Write([]byte(`{"roomName":"room1","isModerator":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/Recordings/start" && r.Header.Get("X-Auth-Token") == "key":
 			_, _ = w.Write([]byte(`{"recordingKey":"r9"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/Recordings/r9/access":
 			_, _ = w.Write([]byte(`{"userAccesses":[{"user":{"key":"k-owner"},"roleId":"owner"},{"user":{"key":"k-guest"},"roleId":"viewer"},{"user":{"key":"k-gone"},"roleId":"none"}]}`))
@@ -167,6 +177,7 @@ func talkRecorder(t *testing.T) (*Plugin, map[string][]byte, *[]string) {
 	}
 	p := &Plugin{config: &configuration{SpaceURL: talkAPI.URL, APIKey: "key"}}
 	p.SetAPI(api)
+	givePersonalKeys(t, p, "u1")
 	return p, kv, &patches
 }
 
@@ -267,4 +278,50 @@ func TestAddressesFromTheIdentityProviderCountAsVerified(t *testing.T) {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
+}
+
+var accessAsked int
+
+func countAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/access") {
+			accessAsked++
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func daysAgo(n int) string {
+	return time.Now().AddDate(0, 0, -n).UTC().Format(time.RFC3339)
+}
+
+func TestPersonalListStopsAtThePeriodAndKeepsGrants(t *testing.T) {
+	p, _ := recordingWorld(t)
+	now := time.Now()
+	personal := p.client().WithPersonalToken("pat")
+	got, next, err := p.userRecordings(context.Background(), personal, p.client(), "k-anna", "", now.AddDate(0, 0, -30), now, 0)
+	if err != nil || next != "" {
+		t.Fatalf("next=%q err=%v", next, err)
+	}
+	if keys := recordingKeys(got); strings.Join(keys, ",") != "r1,r2" {
+		t.Fatalf("anna sees %v", keys)
+	}
+	// The list is Talk's, but a revoked grant still hides the recording.
+	got, _, _ = p.userRecordings(context.Background(), personal, p.client(), "k-boris", "", now.AddDate(0, 0, -30), now, 0)
+	if keys := recordingKeys(got); strings.Join(keys, ",") != "r1" {
+		t.Fatalf("boris sees %v", keys)
+	}
+	// A period that ends before last week leaves only r2.
+	got, _, _ = p.userRecordings(context.Background(), personal, p.client(), "k-anna", "", now.AddDate(0, 0, -30), now.AddDate(0, 0, -3), 0)
+	if keys := recordingKeys(got); strings.Join(keys, ",") != "r2" {
+		t.Fatalf("anna sees %v in an earlier period", keys)
+	}
+}
+
+func recordingKeys(recs []talk.Recording) []string {
+	var keys []string
+	for i := range recs {
+		keys = append(keys, recs[i].Key)
+	}
+	return keys
 }

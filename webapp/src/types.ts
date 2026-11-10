@@ -67,7 +67,6 @@ export interface PluginConfig {
     naming: string;
     open_mode: string;
     calls: boolean;
-    personal_keys: boolean;
     personal_key: boolean;
     join_opens_min: number;
     recording_access?: string;

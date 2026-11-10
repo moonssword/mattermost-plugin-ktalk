@@ -1,11 +1,12 @@
 import React, {useEffect, useState} from 'react';
 import {useSelector, useStore} from 'react-redux';
 
-import {meetingAction, openExternal, runCommand, showRecording} from '../actions';
+import {meetingAction, openExternal, requestKey, runCommand, showRecording} from '../actions';
 import {useLocale, useT} from '../i18n';
 import {canJoin, chipKind, formatClock, initials, isTrustedCard, isWebUrl, onlineText, personColor, repeatLabel, secondsBetween} from '../logic';
 import {useRecordingAccess} from '../recording_access';
-import {useMeetingRights, type MeetingRights} from '../meeting_rights';
+import {forgetAllMeetingRights, useMeetingRights, type MeetingRights} from '../meeting_rights';
+import {meetingsVersion} from '../bus';
 import type {MeetingView} from '../types';
 
 import Dropdown from './dropdown';
@@ -186,7 +187,7 @@ function SelfRow({meeting, status}: {meeting: MeetingView; status: string}) {
                             type='button'
                             className='ktk-link'
                             title={t('Чтобы отвечать отсюда, подключите личный ключ Толка')}
-                            onClick={() => runCommand(store, '/talk connect', meeting.channel_id)}
+                            onClick={() => requestKey(store, t('Ответить на приглашение'), refreshRights)}
                         >
                             {t('Ответить')}
                         </button>
@@ -210,7 +211,7 @@ function AttendeeRows({meeting, rights}: {meeting: MeetingView; rights: MeetingR
     const attendees = schedule.attendees || [];
     // Talk says who is invited; its organizer has nothing to answer.
     const ownKey = rights.key;
-    const answerable = rights.attendee && Boolean(ownKey) && meeting.status === 'scheduled' && Boolean(config?.personal_keys);
+    const answerable = rights.attendee && Boolean(ownKey) && meeting.status === 'scheduled';
     const given = schedule.answers?.[userId] || '';
     const listed = answerable && attendees.some((attendee) => attendee.key === ownKey);
     return (
@@ -263,7 +264,9 @@ const MeetingPost = ({post}: {post: any}) => {
     const scheduled = meeting?.status === 'scheduled';
     const now = useNow(Boolean(live || scheduled));
     // Talk decides who controls a meeting; the server asks it for this user.
-    const rights = useMeetingRights(meeting?.id, meeting?.status, Boolean(config?.enabled));
+    const rights = useMeetingRights(meeting?.id, meeting?.status, Boolean(config?.enabled), Boolean(config?.personal_key));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const userId: string = useSelector((state: any) => state.entities.users.currentUserId);
     // Buttons for recordings go only to those Talk lets open them.
     const allowedRecordings = useRecordingAccess(config?.enabled ? (meeting?.recordings || []).map((recording) => recording.key) : []);
 
@@ -475,9 +478,31 @@ const MeetingPost = ({post}: {post: any}) => {
                         </button>
                     )}
                 </div>
+                {/* Running a meeting is done with the organizer's own key; the
+                    person who started it is told so instead of losing the
+                    buttons without a word. */}
+                {!rights.personal_key && meeting.creator_id === userId && !closed && !meeting.link_only && config?.enabled && (
+                    <div className='ktk-keyline ktk-card__keyline'>
+                        <span className='ktk-keyline__text'>{t('Управлять встречей можно с личным ключом Толка')}</span>
+                        {' · '}
+                        <button
+                            type='button'
+                            className='ktk-link'
+                            onClick={() => requestKey(store, t('Управлять встречей'), refreshRights)}
+                        >
+                            {t('Подключить ключ')}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
 };
+
+/** After the key is connected, cards ask for their rights again. */
+function refreshRights() {
+    forgetAllMeetingRights();
+    meetingsVersion.set(meetingsVersion.get() + 1);
+}
 
 export default MeetingPost;

@@ -74,3 +74,15 @@ export function showToast(message: string) {
     }
     toastTimer = setTimeout(() => toastMessage.set(''), 6000);
 }
+
+/**
+ * An action that waits for the user's personal Talk key. The sidebar shows
+ * the key form, then offers to go on with the action: a click, because a
+ * meeting opens in a new window, which browsers allow only from one.
+ */
+export interface KeyRequest {
+    label: string;
+    proceed: () => void;
+}
+
+export const keyRequest = createStore<KeyRequest | null>(null);

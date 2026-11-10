@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +55,7 @@ func (p *Plugin) initRouter() http.Handler {
 	route("POST /api/v1/calls", p.apiCreateCall)
 	route("GET /api/v1/personal-room", p.apiPersonalRoom)
 	route("GET /api/v1/upcoming", p.apiUpcoming)
+	route("POST /api/v1/seen", p.apiSeen)
 	route("GET /api/v1/personal-key", p.apiPersonalKeyStatus)
 	route("POST /api/v1/personal-key", p.apiConnectPersonalKey)
 	route("DELETE /api/v1/personal-key", p.apiDisconnectPersonalKey)
@@ -135,7 +138,6 @@ func (p *Plugin) apiConfig(w http.ResponseWriter, _ *http.Request, userID string
 		"naming":           p.userPref(userID, prefNaming, cfg.NamingScheme),
 		"open_mode":        p.userPref(userID, prefOpenMode, "tab"),
 		"calls":            cfg.EnableCalls,
-		"personal_keys":    cfg.AllowPersonalKeys,
 		"personal_key":     connected,
 		"join_opens_min":   int(joinOpensBefore.Minutes()),
 		"recording_access": cfg.defaultRecordingAccess(),
@@ -239,9 +241,10 @@ func (p *Plugin) apiActiveMeetings(w http.ResponseWriter, _ *http.Request, userI
 	if err != nil {
 		return err
 	}
+	now := time.Now()
 	out := make([]map[string]any, 0, len(meetings))
 	for _, m := range meetings {
-		if (m.Status != statusLive && m.Status != statusWaiting && m.Status != statusRinging) || !p.canView(userID, m) {
+		if (m.Status != statusLive && m.Status != statusWaiting && m.Status != statusRinging) || m.idle(now) || !p.canView(userID, m) {
 			continue
 		}
 		view := m.view()
@@ -318,17 +321,25 @@ func recordingPeriod(query url.Values, now time.Time) (from, to time.Time, err e
 	return from, to, nil
 }
 
-// apiRecordings pages through space recordings and keeps those the user may
-// see, reading further pages to fill the response when many are filtered out.
+// Paging of the recordings list: Talk's own list of the user's recordings.
+const (
+	// recordingsWanted is how many recordings one answer aims to hold.
+	recordingsWanted = 20
+	userPageSize     = 50
+	userPages        = 6
+	// userPagePrefix marks a page token of the list.
+	userPagePrefix = "u:"
+)
+
+// apiRecordings lists the recordings the user may open in a period. Talk's
+// own list for the user, read with their personal key, says which recordings
+// are theirs; the grants on each still decide, as everywhere else.
 func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID string) error {
-	// Each recording costs a request to Talk for its grants, so the pages
-	// are small and few: at most a hundred requests per call.
-	const wanted, pageSize, maxPages = 20, 25, 4
 	from, to, err := recordingPeriod(r.URL.Query(), time.Now())
 	if err != nil {
 		return err
 	}
-	client, err := p.requireClient()
+	personal, err := p.userClient(userID)
 	if err != nil {
 		return err
 	}
@@ -340,28 +351,55 @@ func (p *Plugin) apiRecordings(w http.ResponseWriter, r *http.Request, userID st
 	if err != nil {
 		return err
 	}
-	cfg := p.getConfig()
-	filter := talk.RecordingFilter{Query: r.URL.Query().Get("q"), StartFrom: &from, StartTo: &to, PageToken: r.URL.Query().Get("page"), Top: pageSize}
-	out := make([]recordingView, 0, wanted)
-	next := ""
+	skip, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Query().Get("page"), userPagePrefix))
 	ctx, cancel := apiContext()
 	defer cancel()
-	for page := 0; page < maxPages && len(out) < wanted; page++ {
-		result, err := client.ListRecordings(ctx, filter)
-		if err != nil {
-			return p.describeAPIError("list recordings", err)
-		}
-		for _, rec := range p.accessibleRecordings(ctx, client, talkKey, result.Entities) {
-			out = append(out, recordingView{Key: rec.Key, Title: rec.Title, URL: cfg.recordingURL(rec.Key), CreatedDate: rec.CreatedDate, Duration: rec.Duration, Participants: rec.ParticipantsCount})
-		}
-		next = result.NextPageToken
-		if next == "" {
-			break
-		}
-		filter.PageToken = next
+	recs, next, err := p.userRecordings(ctx, personal, p.client(), talkKey, r.URL.Query().Get("q"), from, to, max(skip, 0))
+	if err != nil {
+		return p.personalAPIError(personal, userID, "list recordings", err)
+	}
+	cfg := p.getConfig()
+	out := make([]recordingView, 0, len(recs))
+	for _, rec := range recs {
+		out = append(out, recordingView{Key: rec.Key, Title: rec.Title, URL: cfg.recordingURL(rec.Key), CreatedDate: rec.CreatedDate, Duration: rec.Duration, Participants: rec.ParticipantsCount})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"recordings": out, "next_page": next})
 	return nil
+}
+
+// userRecordings pages through the list Talk shows the owner of a personal
+// key. That list has no date filter, but it runs newest first, so paging
+// stops at the first recording older than the period.
+func (p *Plugin) userRecordings(ctx context.Context, personal, client *talk.Client, talkKey, query string, from, to time.Time, skip int) ([]talk.Recording, string, error) {
+	var found []talk.Recording
+	more := true
+	for n := 0; n < userPages && more && len(found) < recordingsWanted; n++ {
+		batch, err := personal.ListUserRecordings(ctx, query, skip, userPageSize)
+		if err != nil {
+			return nil, "", err
+		}
+		skip += len(batch)
+		more = len(batch) == userPageSize
+		for i := range batch {
+			created := batch[i].CreatedDate
+			if created.Before(from) {
+				more = false
+				break
+			}
+			if created.Before(to) {
+				found = append(found, batch[i])
+			}
+		}
+	}
+	out := p.accessibleRecordings(ctx, client, talkKey, found)
+	if out == nil {
+		out = []talk.Recording{}
+	}
+	next := ""
+	if more {
+		next = userPagePrefix + strconv.Itoa(skip)
+	}
+	return out, next, nil
 }
 
 // maxAccessKeys bounds one access question: a card holds a few recordings.
@@ -415,19 +453,21 @@ func (p *Plugin) apiRecordingArtifacts(w http.ResponseWriter, r *http.Request, u
 		return appErr
 	}
 	key := r.PathValue("key")
-	rec, err := p.recordingForUser(user, key)
+	// The texts are read as the user. Talk serves them to any user of the
+	// space, so the grants on the recording are checked first.
+	personal, err := p.userClient(userID)
 	if err != nil {
 		return err
 	}
-	client, err := p.requireClient()
+	rec, err := p.recordingForUser(user, key)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
-	artifacts, err := client.GetSpeechArtifacts(ctx, key)
+	artifacts, err := personal.GetSpeechArtifacts(ctx, key)
 	if err != nil {
-		return p.describeAPIError("speech artifacts", err)
+		return p.personalAPIError(personal, userID, "speech artifacts", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"title":      rec.Title,
@@ -551,6 +591,9 @@ func (p *Plugin) apiAdminStatus(w http.ResponseWriter, _ *http.Request, userID s
 	var state webhookState
 	if found, err := p.kvGet(keyWebhook, &state); err == nil && found {
 		status["webhook"] = state
+	}
+	if withKey, users, err := p.keyUsage(); err == nil {
+		status["personal_keys"] = map[string]int{"connected": withKey, "users": users}
 	}
 
 	client := p.client()
@@ -691,10 +734,6 @@ func (p *Plugin) dialogConnect(w http.ResponseWriter, r *http.Request, userID st
 	if err != nil {
 		return err
 	}
-	if !p.getConfig().AllowPersonalKeys {
-		writeJSON(w, http.StatusOK, model.SubmitDialogResponse{Error: "Личные API-ключи отключены администратором."})
-		return nil
-	}
 	key, err := p.connectPersonalKey(userID, stringField(req.Submission, "token"))
 	if err != nil {
 		p.API.LogInfo("Personal key rejected", "user_id", userID, "error", err.Error())
@@ -779,9 +818,6 @@ func (p *Plugin) apiPersonalKeyStatus(w http.ResponseWriter, _ *http.Request, us
 // apiConnectPersonalKey connects a key typed in the interface. The answer is
 // the new status, or a message the form shows under the field.
 func (p *Plugin) apiConnectPersonalKey(w http.ResponseWriter, r *http.Request, userID string) error {
-	if !p.getConfig().AllowPersonalKeys {
-		return newUserError(http.StatusForbidden, "Личные ключи отключены администратором.")
-	}
 	var req struct {
 		Token string `json:"token"`
 	}

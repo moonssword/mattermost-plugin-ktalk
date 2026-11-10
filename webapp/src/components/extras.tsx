@@ -151,6 +151,7 @@ interface AdminStatus {
     expires_at?: string;
     tariff_expires_at?: string;
     online?: {usersCount: number; conferencesCount: number};
+    personal_keys?: {connected: number; users: number};
     features?: Array<{scope: string; feature: string; ok: boolean}>;
 }
 
@@ -214,6 +215,7 @@ export const AdminStatusPanel = () => {
             {status?.expires_at && <div>{`API-ключ действует до ${date(status.expires_at)}.`}</div>}
             {status?.tariff_expires_at && <div>{`Тариф действует до ${date(status.tariff_expires_at)}.`}</div>}
             {status?.online && <div>{`Сейчас идёт встреч: ${status.online.conferencesCount}, участников: ${status.online.usersCount}.`}</div>}
+            {status?.personal_keys && <div>{`Личные ключи подключили: ${status.personal_keys.connected} из ${status.personal_keys.users} пользователей плагина.`}</div>}
             {status?.features && (
                 <table className='ktk-table'>
                     <tbody>

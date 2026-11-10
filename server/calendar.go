@@ -150,21 +150,10 @@ func listField(sub map[string]any, key string) []string {
 	return nil
 }
 
-// calendarClient picks the key to call the calendar with. A personal key acts
-// as the user; otherwise the space key acts on the user's verified mailbox.
-func (p *Plugin) calendarClient(userID string) (*talk.Client, bool, error) {
-	if personal := p.personalClient(userID); personal != nil {
-		return personal, true, nil
-	}
-	if p.getConfig().CalendarPersonalOnly {
-		return nil, false, errPersonalKeyRequired
-	}
-	client, err := p.requireClient()
-	return client, false, err
-}
-
-var errPersonalKeyRequired = newCodedError(http.StatusConflict, codePersonalKey, "Для работы с календарём подключите личный API-ключ Толка командой /talk connect.")
-
+// calendarClientFor reads a scheduled meeting's event in the background: with
+// the organizer's personal key when the event was made with it, otherwise
+// with the space key on the organizer's mailbox. Changes go through the
+// acting user's own key instead.
 func (p *Plugin) calendarClientFor(m *Meeting) (*talk.Client, error) {
 	if m.Schedule != nil && m.Schedule.UsePersonalKey {
 		if personal := p.personalClient(m.CreatorID); personal != nil {
@@ -250,7 +239,7 @@ func (p *Plugin) scheduleMeeting(user *model.User, channel *model.Channel, rootI
 	if !ok {
 		return nil, notInTalkError()
 	}
-	client, personal, err := p.calendarClient(user.Id)
+	client, err := p.userClient(user.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +260,7 @@ func (p *Plugin) scheduleMeeting(user *model.User, channel *model.Channel, rootI
 		CreatorName: user.GetDisplayName(model.ShowFullName), Kind: kindScheduled, Status: statusScheduled,
 		CreatedAt: now, Lobby: in.Lobby, Pin: in.Pin, Moderators: []string{organizer.Key},
 		Schedule: &Schedule{
-			Email: email, UsePersonalKey: personal, Start: in.Start, End: end, Timezone: timezone,
+			Email: email, UsePersonalKey: true, Start: in.Start, End: end, Timezone: timezone,
 			Description: in.Description, Repeat: in.Repeat, RepeatCount: in.RepeatCount, Recurring: in.Repeat != "", Rule: in.Rule,
 			UserIDs: in.UserIDs, UserKeys: keys, ExternalEmails: in.ExternalEmails, AllowGuests: in.Guests,
 			AutoRecord: in.AutoRecord, EnableSIP: in.SIP,
@@ -281,17 +270,14 @@ func (p *Plugin) scheduleMeeting(user *model.User, channel *model.Channel, rootI
 
 	ctx, cancel := apiContext()
 	defer cancel()
-	// Personal keys cannot be assumed to manage rooms, so the space key does.
-	roomClient, err := p.requireClient()
-	if err != nil {
-		return nil, err
-	}
+	// The organizer makes the room too, so Talk sees them as its owner.
+	roomClient := client
 	if _, err := roomClient.PutRoom(ctx, roomName, roomParamsFor(m)); err != nil {
-		return nil, p.describeAPIError("put room", err)
+		return nil, p.personalAPIError(client, user.Id, "put room", err)
 	}
 	item, err := client.CreateEvent(ctx, email, eventFromInput(in, roomName, timezone, keys, emails))
 	if err != nil {
-		return nil, p.calendarError(client, user.Id, "create event", err)
+		return nil, p.personalAPIError(client, user.Id, "create event", err)
 	}
 	m.Schedule.EventID = item.ID
 	if item.OnlineMeetingURL != "" {
@@ -329,7 +315,8 @@ func (p *Plugin) rescheduleMeeting(user *model.User, m *Meeting, in scheduleInpu
 	if m.Schedule == nil {
 		return newUserError(http.StatusBadRequest, "Это не запланированная встреча.")
 	}
-	client, err := p.calendarClientFor(m)
+	// Only the organizer edits, with their own key.
+	client, err := p.userClient(user.Id)
 	if err != nil {
 		return err
 	}
@@ -344,7 +331,7 @@ func (p *Plugin) rescheduleMeeting(user *model.User, m *Meeting, in scheduleInpu
 	defer cancel()
 	item, err := client.UpdateEvent(ctx, m.Schedule.Email, m.Schedule.EventID, event)
 	if err != nil {
-		return p.calendarError(client, m.CreatorID, "update event", err)
+		return p.personalAPIError(client, user.Id, "update event", err)
 	}
 	// Talk refuses an attendee list without the organizer.
 	if m.CreatorKey != "" && !contains(keys, m.CreatorKey) {
@@ -357,10 +344,7 @@ func (p *Plugin) rescheduleMeeting(user *model.User, m *Meeting, in scheduleInpu
 		p.API.LogWarn("Failed to update attendees", "meeting_id", m.ID, "error", err.Error())
 	}
 	// The waiting room is a room setting, not a calendar one.
-	roomClient, err := p.requireClient()
-	if err != nil {
-		return err
-	}
+	roomClient := client
 	// Room settings are sent from the meeting, so it takes the new values first.
 	guests := scheduledGuests(in, event.End)
 	m.Title, m.Lobby, m.Pin, m.GuestsUntil = in.Title, in.Lobby, in.Pin, guests
@@ -399,14 +383,14 @@ func (p *Plugin) cancelSchedule(userID, meetingID string) error {
 	if m.Schedule == nil {
 		return newUserError(http.StatusBadRequest, "Это не запланированная встреча.")
 	}
-	client, err := p.calendarClientFor(m)
+	client, err := p.userClient(userID)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := apiContext()
 	defer cancel()
 	if err := client.CancelEvent(ctx, m.Schedule.Email, m.Schedule.EventID, ""); err != nil && !talk.IsNotFound(err) {
-		return p.calendarError(client, m.CreatorID, "cancel event", err)
+		return p.personalAPIError(client, userID, "cancel event", err)
 	}
 	p.audit("cancelSchedule", userID, m.ID)
 	if err := p.saveAndRefresh(m.ID, func(fresh *Meeting) { fresh.Status = statusCancelled }); err != nil {
@@ -494,7 +478,7 @@ func (p *Plugin) syncSchedule(_ *talk.Client, m *Meeting, now time.Time) {
 	item, err := p.calendarItem(ctx, client, m)
 	if err != nil {
 		if client.Personal() && talk.IsStatus(err, http.StatusUnauthorized) {
-			_ = p.calendarError(client, m.CreatorID, "refresh attendees", err)
+			_ = p.personalAPIError(client, m.CreatorID, "refresh attendees", err)
 			return
 		}
 		p.noteAPIError(err)
@@ -651,7 +635,7 @@ func (p *Plugin) upcomingForUser(user *model.User) ([]upcomingEvent, error) {
 		return nil, notInTalkError()
 	}
 	ownKey := identity.Key
-	client, _, err := p.calendarClient(user.Id)
+	client, err := p.userClient(user.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +647,7 @@ func (p *Plugin) upcomingForUser(user *model.User) ([]upcomingEvent, error) {
 		return []upcomingEvent{}, nil
 	}
 	if err != nil {
-		return nil, p.calendarError(client, user.Id, "list events", err)
+		return nil, p.personalAPIError(client, user.Id, "list events", err)
 	}
 	cfg := p.getConfig()
 	events := make([]upcomingEvent, 0, len(items))
@@ -789,9 +773,9 @@ func (p *Plugin) respondInvitation(userID, meetingID string, accept bool) error 
 	if m.Schedule == nil || m.Status != statusScheduled || m.Schedule.EventID == "" {
 		return newUserError(http.StatusBadRequest, "Ответить можно только на запланированную встречу.")
 	}
-	client := p.personalClient(userID)
-	if client == nil {
-		return newCodedError(http.StatusConflict, codePersonalKey, "Чтобы отвечать на приглашения в Mattermost, подключите личный ключ Толка в «Настройки → Контур.Толк».")
+	client, err := p.userClient(userID)
+	if err != nil {
+		return err
 	}
 	// Talk says who is invited: an attendee of the event, other than its
 	// organizer, who has nothing to answer.
@@ -813,7 +797,7 @@ func (p *Plugin) respondInvitation(userID, meetingID string, accept bool) error 
 	}
 	if err := client.RespondToEvent(ctx, m.Schedule.EventID, accept); err != nil {
 		if talk.IsStatus(err, http.StatusUnauthorized) {
-			return p.calendarError(client, userID, "respond to invitation", err)
+			return p.personalAPIError(client, userID, "respond to invitation", err)
 		}
 		p.API.LogWarn("Invitation answer refused", "meeting_id", m.ID, "error", err.Error())
 		return newUserError(http.StatusBadGateway, "Толк не принял ответ. Если пространство работает с Outlook или другим внешним календарём, ответьте на приглашение в нём.")

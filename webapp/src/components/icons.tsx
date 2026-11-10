@@ -45,8 +45,11 @@ const Line = ({size = 14, weight = 2, children}: {size?: number; weight?: number
 
 type IconProps = {size?: number; weight?: number};
 
-export const CalendarIcon = ({size}: IconProps) => (
-    <Line size={size}>
+export const CalendarIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
         <rect
             x='3'
             y='5'
@@ -109,8 +112,11 @@ export const ExternalIcon = ({size}: IconProps) => (
     </Line>
 );
 
-export const RecordIcon = ({size}: IconProps) => (
-    <Line size={size}>
+export const RecordIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
         <circle
             cx='12'
             cy='12'
@@ -203,5 +209,50 @@ export const UnavailableIcon = ({size, weight}: IconProps) => (
             r='9'
         />
         <path d='M5.6 5.6l12.8 12.8'/>
+    </Line>
+);
+
+/** Settings: three sliders. */
+export const SlidersIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <path d='M4 6h16M4 12h16M4 18h16'/>
+        <circle
+            cx='9'
+            cy='6'
+            r='2'
+            fill='var(--k-bg, #fff)'
+        />
+        <circle
+            cx='15'
+            cy='12'
+            r='2'
+            fill='var(--k-bg, #fff)'
+        />
+        <circle
+            cx='7'
+            cy='18'
+            r='2'
+            fill='var(--k-bg, #fff)'
+        />
+    </Line>
+);
+
+/** The camera in outline, for empty lists of meetings. */
+export const VideoIcon = ({size, weight}: IconProps) => (
+    <Line
+        size={size}
+        weight={weight}
+    >
+        <rect
+            x='2'
+            y='6'
+            width='13'
+            height='12'
+            rx='3'
+        />
+        <path d='M15 10.5 22 7v10l-7-3.5'/>
     </Line>
 );

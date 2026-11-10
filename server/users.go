@@ -197,7 +197,7 @@ func (p *Plugin) setUserPref(userID, name, value string) error {
 // user has none or personal keys are off.
 func (p *Plugin) personalClient(userID string) *talk.Client {
 	base := p.client()
-	if base == nil || !p.getConfig().AllowPersonalKeys {
+	if base == nil {
 		return nil
 	}
 	var stored personalKey
@@ -308,7 +308,7 @@ func (p *Plugin) disconnectPersonalKey(userID string) error {
 func (p *Plugin) personalKeyStatus(userID string) map[string]any {
 	var stored personalKey
 	found, _ := p.kvGet(keyPAT+userID, &stored)
-	status := map[string]any{"allowed": p.getConfig().AllowPersonalKeys && p.client() != nil, "connected": found}
+	status := map[string]any{"allowed": p.client() != nil, "connected": found}
 	if found {
 		status["name"] = stored.Name
 		if !stored.ConnectedAt.IsZero() {
@@ -320,15 +320,38 @@ func (p *Plugin) personalKeyStatus(userID string) map[string]any {
 
 var errPersonalKeyRevoked = newCodedError(http.StatusConflict, codePersonalKey, "Личный ключ Толка больше не действует: он истёк или отозван. Подключите новый ключ в настройках Контур.Толка.")
 
-// calendarError maps a calendar failure. When Talk refuses a personal key,
-// the key is dropped and its owner told, so the next attempt falls back to
-// the space key instead of failing the same way again.
-func (p *Plugin) calendarError(client *talk.Client, ownerID, action string, err error) *userError {
-	if client != nil && client.Personal() && ownerID != "" && talk.IsStatus(err, http.StatusUnauthorized) {
-		if dropErr := p.disconnectPersonalKey(ownerID); dropErr == nil {
-			p.dmUser(ownerID, "Личный ключ Толка больше не действует: он истёк или отозван. Плагин отключил его. Подключите новый ключ в «Настройки → Контур.Толк» или на вкладке «Запланированные».")
+// errPersonalKeyRequired answers an action that Talk must see as the user's
+// own while the user has no personal key.
+var errPersonalKeyRequired = newCodedError(http.StatusConflict, codePersonalKey, "Для этого действия нужен личный ключ Толка. Подключите его кнопкой настроек в панели Контур.Толка или в «Настройки → Контур.Толк».")
+
+// userClient is how a user acts in Talk: with their personal key, so Talk
+// sees the user and applies the user's own rights. The space key is kept for
+// what the organization does as a whole.
+func (p *Plugin) userClient(userID string) (*talk.Client, error) {
+	if p.client() == nil {
+		return nil, newUserError(http.StatusServiceUnavailable, "Плагин не настроен: администратор должен указать API-ключ пространства.")
+	}
+	if personal := p.personalClient(userID); personal != nil {
+		return personal, nil
+	}
+	return nil, errPersonalKeyRequired
+}
+
+// personalAPIError maps a failure of a call made with a personal key. When
+// Talk no longer takes the key, it is dropped and its owner told; when Talk
+// refuses the action, the user lacks the right in Talk.
+func (p *Plugin) personalAPIError(client *talk.Client, ownerID, action string, err error) *userError {
+	if client != nil && client.Personal() && ownerID != "" {
+		switch {
+		case talk.IsStatus(err, http.StatusUnauthorized):
+			if dropErr := p.disconnectPersonalKey(ownerID); dropErr == nil {
+				p.dmUser(ownerID, "Личный ключ Толка больше не действует: он истёк или отозван. Плагин отключил его. Подключите новый ключ кнопкой настроек в панели Контур.Толка или в «Настройки → Контур.Толк».")
+			}
+			return errPersonalKeyRevoked
+		case talk.IsStatus(err, http.StatusForbidden):
+			p.API.LogInfo("Talk refused a personal key", "action", action, "user_id", ownerID)
+			return newUserError(http.StatusForbidden, "В Толке у вас нет прав на это действие.")
 		}
-		return errPersonalKeyRevoked
 	}
 	return p.describeAPIError(action, err)
 }
@@ -342,7 +365,7 @@ func personalKeyMessage(err error) string {
 	case talk.IsStatus(err, http.StatusUnauthorized):
 		return "Толк не принял этот ключ: он неверный, отозван или истёк. Выпустите новый ключ в Толке."
 	case talk.IsStatus(err, http.StatusForbidden):
-		return "Толк не дал этому ключу доступ к календарю. Проверьте, что ключ выпущен в этом пространстве Толка."
+		return "Толк не дал этому ключу доступ к календарю. Проверьте, что ключ выпущен в этом же пространстве Толка."
 	}
 	return "Не удалось проверить ключ в Толке. Попробуйте ещё раз позже."
 }
@@ -353,5 +376,5 @@ func personalKeyConnected(key personalKey) string {
 	if key.Name != "" {
 		who = " Ключ выпущен пользователем Толка " + key.Name + "."
 	}
-	return "Личный ключ Толка подключён: встречи, которые вы планируете, создаются от вашего имени, а на приглашения можно отвечать прямо в Mattermost." + who
+	return "Личный ключ Толка подключён. Теперь можно планировать встречи, управлять ими, открывать свою комнату и смотреть записи; в Толке всё это выполняется от вашего имени." + who
 }

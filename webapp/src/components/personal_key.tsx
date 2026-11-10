@@ -2,6 +2,7 @@ import React, {useEffect, useState} from 'react';
 
 import {loadConfig} from '../actions';
 import {meetingsVersion} from '../bus';
+import {forgetAllMeetingRights} from '../meeting_rights';
 import {api} from '../client';
 import {useT} from '../i18n';
 
@@ -33,15 +34,16 @@ function hideOffer() {
     }
 }
 
-const ABOUT_KEY = 'С личным ключом Толка встречи из Mattermost создаются от вашего имени, а на приглашения можно отвечать прямо в карточке встречи. Без ключа встречи создаются через ключ пространства.';
+const ABOUT_KEY = 'С личным ключом Толка плагин действует от вашего имени и с вашими правами в Толке: создаёт комнаты и встречи, управляет ими, отвечает на приглашения и показывает ваши записи.';
 
-function KeyForm({token, busy, error, onToken, onSubmit, onCancel}: {
+function KeyForm({token, busy, error, onToken, onSubmit, onCancel, cancelLabel = 'Отмена'}: {
     token: string;
     busy: boolean;
     error: string;
     onToken: (value: string) => void;
     onSubmit: (event: React.FormEvent) => void;
     onCancel?: () => void;
+    cancelLabel?: string;
 }) {
     const t = useT();
     return (
@@ -77,7 +79,7 @@ function KeyForm({token, busy, error, onToken, onSubmit, onCancel}: {
                         className='ktk-btn ktk-btn--secondary'
                         onClick={onCancel}
                     >
-                        {t('Отмена')}
+                        {t(cancelLabel)}
                     </button>
                 )}
             </div>
@@ -90,10 +92,11 @@ function KeyForm({token, busy, error, onToken, onSubmit, onCancel}: {
  * meetings are planned under the user's own name and invitations can be
  * answered from Mattermost. The key is sent once and never shown again.
  *
- * In settings it is a full panel. Above the meeting list it is one quiet line
- * whose explanation sits behind an "i" mark.
+ * In settings it is a full panel. On a first visit the sidebar shows the full
+ * panel too, with "Later" folding it into one quiet line whose explanation
+ * sits behind an "i" mark.
  */
-export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
+export function PersonalKeyPanel({inline = false, onLater}: {inline?: boolean; onLater?: () => void}) {
     const t = useT();
     const config = useConfig();
     const [status, setStatus] = useState<KeyStatus | null>(null);
@@ -116,6 +119,7 @@ export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
         setToken('');
         setError('');
         await loadConfig();
+        forgetAllMeetingRights();
         meetingsVersion.set(meetingsVersion.get() + 1);
     };
 
@@ -160,7 +164,8 @@ export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
             onCancel={inline ? () => {
                 setOpen(false);
                 setError('');
-            } : undefined}
+            } : onLater}
+            cancelLabel={inline ? 'Отмена' : 'Позже'}
         />
     );
 
@@ -197,7 +202,7 @@ export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
                 <div className='ktk-keyline ktk-keyline--offer'>
                     <InfoTip text={t(ABOUT_KEY)}/>
                     <span className='ktk-keyline__text'>
-                        {t('Отвечайте на приглашения прямо здесь')}
+                        {t('Планирование, управление встречами и записи доступны с личным ключом')}
                         {!open && (
                             <>
                                 {' · '}
@@ -240,7 +245,7 @@ export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
                 <CheckIcon size={16}/>
                 <div className='ktk-key__body'>
                     <div>
-                        {t('Календарь работает от вашего имени')}
+                        {t('Личный ключ подключён')}
                         {status.name ? ` · ${status.name}` : ''}
                     </div>
                     {error && <div className='ktk-key__error'>{error}</div>}
@@ -261,7 +266,7 @@ export function PersonalKeyPanel({inline = false}: {inline?: boolean}) {
         <div className='ktk-notice ktk-key'>
             <InfoIcon size={16}/>
             <div className='ktk-key__body'>
-                <div>{t('Подключите личный ключ Толка, чтобы планировать встречи от своего имени и отвечать на приглашения прямо здесь.')}</div>
+                <div>{t('Подключите личный ключ Толка, чтобы планировать встречи, управлять ими, открывать свою комнату и смотреть записи. В Толке всё это будет выполняться от вашего имени.')}</div>
                 {open && form}
             </div>
         </div>
