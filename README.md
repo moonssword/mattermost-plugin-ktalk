@@ -15,7 +15,7 @@ A Mattermost plugin for [Kontur Talk](https://kontur.ru/talk) (Контур.То
 
 ## Features
 
-- **One-click meetings.** A channel header button, `/talk start [topic]`, a button in the channel intro, and *Discuss in Talk* in the message menu. In a channel the meeting link is posted; in a direct or group chat the call button asks whether to ring or only post the link, and `/talk link [topic]` posts it without ringing.
+- **One-click meetings.** A channel header button, `/talk start [topic]`, a button in the channel intro, and *Discuss in Talk* in the message menu. In a channel the meeting link is posted; in a direct or group chat the call button asks whether to ring or only post the link (only a call opens the room for the caller; a posted link leaves them in the chat), and `/talk link [topic]` posts it without ringing.
 - **Live meeting cards.** Status, duration, who is in the room, PIN, dial-in numbers, and *Join*, *Start recording* and *End for everyone* buttons, shown to those Talk allows to use them.
 - **Calls in direct and group messages.** The call button offers to ring or only send a meeting link. Recipients of a call get it inside Mattermost: a ringing window, a desktop notification and a mobile push. People with a Talk account can also be rung in the Talk app. Answers show up on the caller's card.
 - **Scheduling.** `/talk schedule` with time, recurrence chosen as in Talk (weekdays, every N days, weeks or months on chosen days, until a date or for a number of meetings), participants, external guests, PIN, waiting room and auto-recording. The card tracks invitees' answers, and the bot posts a reminder before the start.

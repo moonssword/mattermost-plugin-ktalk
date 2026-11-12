@@ -98,14 +98,16 @@ export function requestKey(store: Store, label: string, proceed: () => void) {
     }
 }
 
-async function withWindow(store: Store, work: () => Promise<{url: string}>, label = '', again?: () => void) {
-    const target = reserveWindow();
+async function withWindow(store: Store, work: () => Promise<{url: string}>, label = '', again?: () => void, open = true) {
+    const target = open ? reserveWindow() : null;
     try {
         const {url} = await work();
         if (!isWebUrl(url)) {
             throw new Error(tFromState(store.getState(), 'Не удалось выполнить действие.'));
         }
-        finishWindow(target, url);
+        if (open) {
+            finishWindow(target, url);
+        }
     } catch (error) {
         target?.close();
         if (again && askForKey(error, label, again)) {
@@ -124,8 +126,10 @@ function currentContext(store: Store): {channelId: string; teamId: string} {
 /**
  * Starts a meeting. In a direct or group chat it rings the others unless
  * linkOnly is set. With the "ask" scheme the server shows a dialog instead.
+ * open=false only posts the card: a link sent to a chat leaves the sender
+ * where they are until someone joins.
  */
-export async function startMeeting(store: Store, channelId?: string, rootId = '', linkOnly = false) {
+export async function startMeeting(store: Store, channelId?: string, rootId = '', linkOnly = false, open = true) {
     const context = currentContext(store);
     const channel = channelId || context.channelId;
     if (getConfig()?.naming === 'ask') {
@@ -136,7 +140,8 @@ export async function startMeeting(store: Store, channelId?: string, rootId = ''
         store,
         () => api<{url: string; meeting: MeetingView}>('POST', '/meetings', {channel_id: channel, root_id: rootId, link_only: linkOnly}),
         tFromState(store.getState(), linkOnly ? 'Начать встречу' : 'Позвонить'),
-        () => startMeeting(store, channel, rootId, linkOnly),
+        () => startMeeting(store, channel, rootId, linkOnly, open),
+        open,
     );
 }
 

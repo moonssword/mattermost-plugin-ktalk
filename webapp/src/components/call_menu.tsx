@@ -147,7 +147,8 @@ const CallMenuRoot = () => {
     }
     const choose = (linkOnly: boolean) => {
         callMenu.set(null);
-        startMeeting(store as Store, menu.channelId, '', linkOnly);
+        // A link sent to a chat opens nothing; a call opens the room to wait in.
+        startMeeting(store as Store, menu.channelId, '', linkOnly, !linkOnly);
     };
     return (
         <div
