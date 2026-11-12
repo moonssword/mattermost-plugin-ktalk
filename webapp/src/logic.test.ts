@@ -38,6 +38,7 @@ describe('isSpaceLink', () => {
     it('matches rooms and recordings of the space only', () => {
         expect(isSpaceLink('https://x.ktalk.ru/abc123', space)).toBe(true);
         expect(isSpaceLink('https://x.ktalk.ru/recordings/k1', space)).toBe(true);
+        expect(isSpaceLink('https://X.ktalk.ru/TeamDaily', space)).toBe(true);
         expect(isSpaceLink('https://other.ktalk.ru/abc123', space)).toBe(false);
         expect(isSpaceLink('https://x.ktalk.ru/content/artifacts', space)).toBe(false);
         expect(isSpaceLink('not a url', space)).toBe(false);

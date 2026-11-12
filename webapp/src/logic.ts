@@ -38,7 +38,7 @@ export function isSpaceLink(url: string | undefined, spaceURL: string): boolean 
         const parsed = new URL(url);
         const pathname = parsed.pathname.replace(/\/+$/, '');
         return parsed.origin.toLowerCase() === new URL(spaceURL).origin.toLowerCase() &&
-            (/^\/[a-z0-9]{3,64}$/.test(pathname) || /^\/recordings\/[^/]+$/.test(pathname));
+            (/^\/[a-z0-9]{3,64}$/i.test(pathname) || /^\/recordings\/[^/]+$/.test(pathname));
     } catch {
         return false;
     }

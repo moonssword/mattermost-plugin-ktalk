@@ -549,7 +549,8 @@ func (p *Plugin) apiPreview(w http.ResponseWriter, r *http.Request, userID strin
 		writeJSON(w, http.StatusOK, preview)
 		return nil
 	}
-	roomName := strings.Trim(target.Path, "/")
+	// Talk keeps room keys in lower case and opens a link typed in any case.
+	roomName := strings.ToLower(strings.Trim(target.Path, "/"))
 	preview := map[string]any{"type": "room", "url": target.String()}
 	if validRoomName(roomName) {
 		if m, indexErr := p.getMeetingByIndex(keyRoom + roomName); indexErr == nil && p.canView(userID, m) {

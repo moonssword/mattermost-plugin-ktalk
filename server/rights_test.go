@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +196,25 @@ func TestRoomsAreMadeWithTheUsersOwnKey(t *testing.T) {
 	// A personal room is the user's own and always needs their key.
 	if _, err := p.userClient("guest"); !errors.As(err, &needKey) {
 		t.Fatalf("user client without a key: %v", err)
+	}
+}
+
+// A link typed with capitals opens the same room in Talk, so its preview
+// shows the meeting too.
+func TestPreviewIgnoresLinkCase(t *testing.T) {
+	p := rightsWorld(t)
+	space := p.getConfig().SpaceURL
+	link := strings.ToUpper(space[:8]) + space[8:] + "/Room1"
+	req := httptest.NewRequest(http.MethodGet, "/preview?url="+url.QueryEscape(link), nil)
+	rec := httptest.NewRecorder()
+	if err := p.apiPreview(rec, req, "guest"); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["type"] != "room" || got["status"] != statusScheduled {
+		t.Fatalf("preview %v", got)
 	}
 }
