@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-12
+
+### Changed
+
+- *Send link* in a direct or group chat only posts the meeting card and no longer opens Talk for the sender. *Call* still opens the room to wait in.
+
 ## [0.7.1] - 2026-11-12
 
 ### Fixed
@@ -170,7 +176,8 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.5.1...v0.6.0
