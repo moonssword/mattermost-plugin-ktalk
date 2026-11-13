@@ -381,12 +381,18 @@ export const CSS = `
 }
 `;
 
+// An update reloads the plugin in tabs that stay open, and the element from
+// the previous version is still there: its text is replaced, or parts added
+// since, such as the call menu, would stay unstyled until a reload.
 export function injectStyles() {
     const id = 'konturtalk-styles';
-    if (!document.getElementById(id)) {
-        const element = document.createElement('style');
+    let element = document.getElementById(id);
+    if (!element) {
+        element = document.createElement('style');
         element.id = id;
-        element.textContent = CSS;
         document.head.appendChild(element);
+    }
+    if (element.textContent !== CSS) {
+        element.textContent = CSS;
     }
 }
