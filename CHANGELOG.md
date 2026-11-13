@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-13
+
+### Fixed
+
+- After a plugin update, tabs left open kept the previous version's styles, so parts added since, such as the call menu in a chat, showed as plain buttons until the page was reloaded. The styles are now replaced along with the plugin.
+
 ## [0.7.2] - 2026-11-12
 
 ### Changed
@@ -176,7 +182,8 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.6.0...v0.7.0
