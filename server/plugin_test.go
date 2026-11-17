@@ -714,6 +714,66 @@ func TestParticipantValueReadsAndRoundTrips(t *testing.T) {
 	}
 }
 
+// The participant field finds people by first and last name, which the
+// search Mattermost gives plugins does not look at.
+func TestParticipantSearchFindsNames(t *testing.T) {
+	team := []*model.User{
+		{Id: "u1", Username: "ivan.petrov", FirstName: "Иван", LastName: "Петров"},
+		{Id: "u2", Username: "a.semenova", FirstName: "Алёна", LastName: "Семёнова", Nickname: "Лена"},
+		{Id: "u3", Username: "ivanov", FirstName: "Пётр", LastName: "Иванов"},
+		{Id: "bot", Username: "ktalkbot", FirstName: "Иван", IsBot: true},
+		{Id: "gone", Username: "old.ivan", FirstName: "Иван", DeleteAt: 1},
+	}
+	showFullName := true
+	api := &plugintest.API{}
+	// Two teams, as for a form opened in a direct chat; ivanov is in both.
+	api.On("GetUsersInTeam", "t1", 0, rosterPage).Return(team[:3], nil).Once()
+	api.On("GetUsersInTeam", "t2", 0, rosterPage).Return(team[2:], nil).Once()
+	api.On("GetConfig").Return(func() *model.Config {
+		cfg := &model.Config{}
+		cfg.PrivacySettings.ShowFullName = model.NewPointer(showFullName)
+		return cfg
+	})
+	p := &Plugin{}
+	p.SetAPI(api)
+	find := func(query string) string {
+		users, appErr := p.searchTeamUsers([]string{"t1", "t2"}, query)
+		if appErr != nil {
+			t.Fatal(appErr)
+		}
+		names := []string{}
+		for _, user := range users {
+			names = append(names, user.Username)
+		}
+		return strings.Join(names, " ")
+	}
+	cases := map[string]string{
+		"Иван":      "ivan.petrov ivanov",
+		"петров":    "ivan.petrov",
+		"петров ив": "ivan.petrov",
+		"семенова":  "a.semenova",
+		"Лена":      "a.semenova",
+		"@ivan":     "ivan.petrov ivanov",
+		"petrov":    "ivan.petrov",
+		"иванов":    "ivanov",
+		"петр":      "ivan.petrov ivanov",
+		"сидоров":   "",
+		"   ":       "",
+	}
+	for query, want := range cases {
+		if got := find(query); got != want {
+			t.Errorf("%q: got %q, want %q", query, got, want)
+		}
+	}
+	// Names stay out of the search when the server hides full names; the
+	// team list itself comes from the cache.
+	showFullName = false
+	if got := find("Иван"); got != "" {
+		t.Errorf("hidden full names: got %q", got)
+	}
+	api.AssertNumberOfCalls(t, "GetUsersInTeam", 2)
+}
+
 func TestUnopenedLinkLeavesCurrentMeetingsAfterTwoHours(t *testing.T) {
 	now := time.Now()
 	m := &Meeting{Status: statusWaiting, Kind: kindAdhoc, CreatedAt: now.Add(-3 * time.Hour)}

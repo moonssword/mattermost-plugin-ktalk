@@ -55,6 +55,9 @@ type Plugin struct {
 
 	debounceLock sync.Mutex
 	debounced    map[string]*time.Timer
+
+	rosterLock sync.Mutex
+	rosters    map[string]teamRoster
 }
 
 // metrics are per-node counters served by ServeMetrics.
