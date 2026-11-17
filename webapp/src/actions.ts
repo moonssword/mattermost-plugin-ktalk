@@ -181,18 +181,21 @@ export async function runCommand(store: Store, command: string, channelId?: stri
     }
 }
 
-export async function meetingAction(id: string, action: string, done?: string, body?: unknown) {
+/** Runs an action on a meeting and says whether it went through. */
+export async function meetingAction(id: string, action: string, done?: string, body?: unknown): Promise<boolean> {
     try {
         await api('POST', `/meetings/${id}/${action}`, body);
         meetingsVersion.set(meetingsVersion.get() + 1);
         if (done) {
             showToast(done);
         }
+        return true;
     } catch (error) {
         if (askForKey(error, tFromState(appStore?.getState(), 'Управлять встречей'), () => meetingAction(id, action, done, body))) {
-            return;
+            return false;
         }
         showToast((error as Error).message);
+        return false;
     }
 }
 

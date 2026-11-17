@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import {useStore} from 'react-redux';
 
-import {openExternal, openPersonalRoom, requestKey, runCommand, startMeeting} from '../actions';
+import {meetingAction, openExternal, openPersonalRoom, requestKey, runCommand, startMeeting} from '../actions';
 import {keyRequest, meetingsVersion, rhsRecording} from '../bus';
 import {api, ApiError, isNetworkError, NETWORK_ERROR} from '../client';
 import {useLocale, useT} from '../i18n';
@@ -10,7 +10,7 @@ import type {MeetingView, RecordingArtifacts, RecordingItem, UpcomingEvent} from
 
 import {useCallPlace} from './call_menu';
 import Dropdown from './dropdown';
-import {CalendarIcon, CameraIcon, ChevronLeftIcon, ClockIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, PhoneIcon, RecordIcon, RoomIcon, SlidersIcon, UnavailableIcon, VideoIcon} from './icons';
+import {CalendarIcon, CameraIcon, ChevronLeftIcon, ClockIcon, CrossIcon, DocumentIcon, EditIcon, ExternalIcon, InfoIcon, PhoneIcon, RecordIcon, RoomIcon, SlidersIcon, UnavailableIcon, VideoIcon} from './icons';
 import Markdown from './markdown';
 import {PersonalKeyPanel} from './personal_key';
 import SettingsPanel from './settings_panel';
@@ -262,12 +262,25 @@ function UpcomingTab({onCount}: {onCount: (count: number) => void}) {
     const store = useStore();
     const version = useThrottledVersion(10000);
     const config = useConfig();
-    const {data, error} = useLoad<UpcomingEvent[]>('/upcoming', [version, config?.personal_key]);
+    const {data: loaded, error} = useLoad<UpcomingEvent[]>('/upcoming', [version, config?.personal_key]);
+    // A cancelled meeting leaves the list at once, before the next refresh.
+    const [cancelled, setCancelled] = useState<string[]>([]);
+    const data = loaded?.filter((event) => !event.meeting_id || !cancelled.includes(event.meeting_id));
+    const shownCount = data?.length;
     useEffect(() => {
-        if (data) {
-            onCount(data.length);
+        if (shownCount !== undefined) {
+            onCount(shownCount);
         }
-    }, [data, onCount]);
+    }, [shownCount, onCount]);
+    const cancel = async (event: UpcomingEvent) => {
+        const id = event.meeting_id;
+        if (!id || !window.confirm(t('Отменить эту встречу? Участники получат уведомление.'))) {
+            return;
+        }
+        if (await meetingAction(id, 'cancel-schedule', t('Встреча отменена.'))) {
+            setCancelled((ids) => [...ids, id]);
+        }
+    };
     if (error) {
         // A missing personal key is solved right here, not with a command.
         if (error.code === 'personal_key_required') {
@@ -331,6 +344,16 @@ function UpcomingTab({onCount}: {onCount: (count: number) => void}) {
                                     onClick={() => runCommand(store, `/talk schedule edit ${event.meeting_id}`, event.channel_id)}
                                 >
                                     <EditIcon/>
+                                </button>
+                            )}
+                            {event.meeting_id && (
+                                <button
+                                    className='ktk-btn ktk-btn--danger ktk-btn--icon'
+                                    title={t('Отменить встречу')}
+                                    aria-label={`${t('Отменить встречу')}: ${event.subject}`}
+                                    onClick={() => cancel(event)}
+                                >
+                                    <CrossIcon/>
                                 </button>
                             )}
                         </div>

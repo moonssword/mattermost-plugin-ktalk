@@ -15,6 +15,7 @@ const en: Record<string, string> = {
     'Отменить звонок': 'Cancel call',
     'Изменить': 'Edit',
     'Отменить встречу': 'Cancel meeting',
+    'Встреча отменена.': 'Meeting cancelled.',
     'Отменить эту встречу? Участники получат уведомление.': 'Cancel this meeting? Attendees will be notified.',
     'Ожидание участников': 'Waiting for participants',
     'Идёт звонок': 'Calling',
