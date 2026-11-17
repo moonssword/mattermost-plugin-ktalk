@@ -556,6 +556,14 @@ function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKe
     const {data, error} = useLoad<RecordingArtifacts>(`/recordings/${encodeURIComponent(recordingKey)}/artifacts`);
 
     useEffect(() => setSection(initial), [initial]);
+    // A tab switched far down a long summary starts the next one from its top.
+    const scroller = useRef<HTMLDivElement>(null);
+    const show = (name: string) => {
+        setSection(name);
+        if (scroller.current) {
+            scroller.current.scrollTop = 0;
+        }
+    };
 
     let body: React.ReactNode = <Skeleton
         kind='text'
@@ -625,18 +633,24 @@ function RecordingDetails({recordingKey, section: initial, onBack}: {recordingKe
                     {t('Назад')}
                 </button>
             </div>
-            <div className='ktk-rhs__scroll'>
+            <div
+                className='ktk-rhs__scroll'
+                ref={scroller}
+            >
                 {data && <div className='ktk-detail-title'>{data.title}</div>}
-                <div className='ktk-tabs'>
-                    {['summary', 'protocol', 'transcript'].map((name) => (
-                        <button
-                            key={name}
-                            className={'ktk-tab' + (section === name ? ' ktk-tab--active' : '')}
-                            onClick={() => setSection(name)}
-                        >
-                            {t(({summary: 'Пересказ', protocol: 'Протокол', transcript: 'Транскрипт'} as Record<string, string>)[name])}
-                        </button>
-                    ))}
+                {/* Stays at the top while the text scrolls under it. */}
+                <div className='ktk-detail-tabs'>
+                    <div className='ktk-tabs'>
+                        {['summary', 'protocol', 'transcript'].map((name) => (
+                            <button
+                                key={name}
+                                className={'ktk-tab' + (section === name ? ' ktk-tab--active' : '')}
+                                onClick={() => show(name)}
+                            >
+                                {t(({summary: 'Пересказ', protocol: 'Протокол', transcript: 'Транскрипт'} as Record<string, string>)[name])}
+                            </button>
+                        ))}
+                    </div>
                 </div>
                 <div style={{paddingTop: 12}}>{body}</div>
             </div>

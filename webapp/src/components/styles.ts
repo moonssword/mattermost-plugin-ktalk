@@ -106,6 +106,10 @@ export const CSS = `
 .ktk-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:20px}
 .ktk-md.ktk-text{white-space:normal}
 .ktk-detail-title{padding:4px 0 8px;font-weight:600;overflow-wrap:anywhere}
+/* The scroll area is padded on top; the bar covers that strip too, so text
+   does not show above it. Cards have no such padding. */
+.ktk-detail-tabs{position:sticky;top:-8px;z-index:2;margin:-8px -12px 0;padding:8px 12px 0;background:var(--k-bg)}
+[data-ktk-style="cards"] .ktk-detail-tabs{top:0;margin-top:0;padding-top:0}
 .ktk-line{padding:6px 0}
 /* Who speaks and when: the name leads, the time sits quietly on the right. */
 .ktk-line__meta{display:flex;align-items:baseline;gap:8px;margin-bottom:2px;font-size:12px;color:rgba(var(--k-fg-rgb),.64)}
