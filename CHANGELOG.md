@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-17
+
+### Added
+
+- The organizer can cancel a meeting planned from Mattermost right in the *Upcoming* tab of the sidebar, next to *Edit*, without looking for its card in the channel. Attendees are notified as when it is cancelled from the card.
+
+### Changed
+
+- The *Summary*, *Minutes* and *Transcript* tabs of a recording stay at the top of the sidebar while the text scrolls, and switching a tab starts the next text from its beginning.
+
+### Fixed
+
+- The *Participants* field of the schedule form finds people by first and last name, in any order and case, and "е" finds "ё". Before, it searched only usernames and nicknames, because that is all the search Mattermost gives plugins looks at. Names are searched only when the server shows full names.
+- The *Participants* field found nobody when the schedule form was opened in a direct or group chat, which belongs to no team. It now searches all the teams of the user there.
+
 ## [0.7.3] - 2026-11-13
 
 ### Fixed
@@ -182,7 +197,8 @@ First public release.
 
 - Meetings, calls, scheduling, recordings and summaries, the sidebar, presence and administrator settings.
 
-[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/moonssword/mattermost-plugin-ktalk/compare/v0.7.0...v0.7.1
